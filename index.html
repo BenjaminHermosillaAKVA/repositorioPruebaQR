@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Ficha de Trazabilidad</title>
+    <!--
+        Visor estático de la ficha de trazabilidad (se publica en GitHub Pages).
+        El QR generado en /trazabilidad_qr apunta a esta página con la ficha comprimida
+        después del "#": deflate-raw + base64url de un JSON compacto (ver construirPayloadQr
+        en qr-grupo-traceability.component.ts). El fragmento nunca se envía al servidor,
+        así que la página no recibe ni guarda datos: solo arma el PDF en el teléfono.
+    -->
+    <style>
+        :root { --brand: #0E4C92; --text: #1F2937; --muted: #6B7280; --bg: #F3F4F6; --card: #FFFFFF; }
+        @media (prefers-color-scheme: dark) {
+            :root { --text: #E5E7EB; --muted: #9CA3AF; --bg: #111827; --card: #1F2937; }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 16px; background: var(--bg); color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        .card {
+            width: 100%; max-width: 380px; padding: 28px 24px; border-radius: 14px; text-align: center;
+            background: var(--card); box-shadow: 0 6px 24px rgba(0, 0, 0, .08);
+        }
+        .card__brand { height: 6px; margin: -28px -24px 22px; border-radius: 14px 14px 0 0; background: var(--brand); }
+        h1 { margin: 0 0 6px; font-size: 1.15rem; }
+        p { margin: 0 0 18px; color: var(--muted); font-size: .92rem; line-height: 1.4; }
+        .spinner {
+            width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
+            border: 3px solid rgba(14, 76, 146, .2); border-top-color: var(--brand);
+            animation: spin .8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .actions { display: flex; flex-direction: column; gap: 10px; }
+        .btn {
+            display: block; padding: 12px 16px; border-radius: 10px; font-size: .95rem; font-weight: 600;
+            text-decoration: none; background: var(--brand); color: #FFFFFF;
+        }
+        .btn--secondary { background: transparent; color: var(--brand); border: 1.5px solid var(--brand); }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="card__brand"></div>
+
+        <section id="estado-cargando">
+            <div class="spinner"></div>
+            <h1>Generando ficha…</h1>
+            <p>Preparando el PDF de trazabilidad del grupo.</p>
+        </section>
+
+        <section id="estado-listo" hidden>
+            <h1 id="titulo-listo">Ficha lista</h1>
+            <p>Si el PDF no se abrió solo, tócalo aquí.</p>
+            <div class="actions">
+                <a id="btn-abrir" class="btn" href="#">Abrir PDF</a>
+                <a id="btn-descargar" class="btn btn--secondary" href="#">Descargar PDF</a>
+            </div>
+        </section>
+
+        <section id="estado-error" hidden>
+            <h1>No se pudo abrir la ficha</h1>
+            <p id="detalle-error">El código QR está incompleto o no es válido.</p>
+        </section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script>
+        (function () {
+            'use strict';
+
+            var COLOR_PRIMARY = '#0E4C92';
+            var COLOR_TEXT = '#1F2937';
+            var COLOR_MUTED = '#6B7280';
+            var COLOR_BORDER = '#E5E7EB';
+            var COLOR_OK = '#16A34A';
+            var COLOR_WARNING = '#D97706';
+            var COLOR_PENDING = '#9CA3AF';
+
+            var PAGE_WIDTH = 595.28;
+            var PAGE_HEIGHT = 841.89;
+            var MARGIN = 40;
+            var CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+
+            function mostrar(idEstado) {
+                ['estado-cargando', 'estado-listo', 'estado-error'].forEach(function (id) {
+                    document.getElementById(id).hidden = id !== idEstado;
+                });
+            }
+
+            function mostrarError(mensaje) {
+                if (mensaje) document.getElementById('detalle-error').textContent = mensaje;
+                mostrar('estado-error');
+            }
+
+            // base64url -> bytes -> inflateRaw -> JSON
+            function decodificarPayload(fragmento) {
+                var base64 = fragmento.replace(/-/g, '+').replace(/_/g, '/');
+                while (base64.length % 4 !== 0) base64 += '=';
+                var binario = atob(base64);
+                var bytes = new Uint8Array(binario.length);
+                for (var index = 0; index < binario.length; index++) bytes[index] = binario.charCodeAt(index);
+                return JSON.parse(pako.inflateRaw(bytes, { to: 'string' }));
+            }
+
+            function formatoKg(valor) {
+                return Math.round(valor || 0).toLocaleString('es-CL');
+            }
+
+            function formatoPorcentaje(valor) {
+                return (valor || 0).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            }
+
+            // Las fuentes estándar de jsPDF no traen el guion largo.
+            function limpiar(texto) {
+                return String(texto == null ? '' : texto).replace(/[—–]/g, '-');
+            }
+
+            function generarPdf(ficha) {
+                var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+                var cursorY = 0;
+
+                function texto(valor, x, y, tamano, negrita, color, opciones) {
+                    doc.setFont('helvetica', negrita ? 'bold' : 'normal');
+                    doc.setFontSize(tamano);
+                    doc.setTextColor(color || COLOR_TEXT);
+                    doc.text(limpiar(valor), x, y, opciones || {});
+                }
+
+                function rect(x, y, ancho, alto, color) {
+                    doc.setFillColor(color);
+                    doc.rect(x, y, ancho, alto, 'F');
+                }
+
+                function linea(x1, y1, x2, y2) {
+                    doc.setDrawColor(COLOR_BORDER);
+                    doc.setLineWidth(0.75);
+                    doc.line(x1, y1, x2, y2);
+                }
+
+                function cortar(valor, tamano, anchoMaximo) {
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(tamano);
+                    return doc.splitTextToSize(limpiar(valor), anchoMaximo);
+                }
+
+                function asegurarEspacio(alto) {
+                    if (cursorY + alto <= PAGE_HEIGHT - MARGIN) return;
+                    doc.addPage();
+                    cursorY = MARGIN;
+                }
+
+                function seccion(titulo) {
+                    asegurarEspacio(40);
+                    cursorY += 10;
+                    texto(titulo, MARGIN, cursorY + 12, 13, true, COLOR_PRIMARY);
+                    cursorY += 20;
+                    linea(MARGIN, cursorY, MARGIN + CONTENT_WIDTH, cursorY);
+                    cursorY += 10;
+                }
+
+                function fila(etiqueta, valor, colorValor) {
+                    var lineas = cortar(valor || '-', 10, CONTENT_WIDTH - 150);
+                    asegurarEspacio(lineas.length * 14 + 4);
+                    texto(etiqueta, MARGIN, cursorY + 10, 10, false, COLOR_MUTED);
+                    lineas.forEach(function (lineaTexto) {
+                        texto(lineaTexto, MARGIN + 150, cursorY + 10, 10, true, colorValor || COLOR_TEXT);
+                        cursorY += 14;
+                    });
+                    cursorY += 2;
+                }
+
+                // Encabezado
+                rect(0, 0, PAGE_WIDTH, 96, COLOR_PRIMARY);
+                texto('Ficha de Trazabilidad', MARGIN, 38, 20, true, '#FFFFFF');
+                texto('Grupo de peces', MARGIN, 60, 11, false, '#C7DBF5');
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(12);
+                var anchoCodigo = doc.getTextWidth(limpiar(ficha.c)) + 24;
+                var codigoX = PAGE_WIDTH - MARGIN - anchoCodigo;
+                rect(codigoX, 30, anchoCodigo, 26, '#FFFFFF');
+                texto(ficha.c, codigoX + 12, 47.5, 12, true, COLOR_PRIMARY);
+
+                var subtitulo = [ficha.e, ficha.ce].filter(Boolean).join(' · ');
+                if (subtitulo) texto(subtitulo, MARGIN, 82, 10, false, '#FFFFFF');
+
+                cursorY = 110;
+                if (ficha.a && ficha.a.m > 0) {
+                    rect(MARGIN, cursorY, CONTENT_WIDTH, 26, '#FEF3C7');
+                    rect(MARGIN, cursorY, 3, 26, COLOR_WARNING);
+                    texto('Alimentación medicada: ' + formatoPorcentaje(ficha.a.p) + '% del total',
+                        MARGIN + 12, cursorY + 17, 10, true, '#92400E');
+                    cursorY += 34;
+                }
+
+                // Detalle del grupo
+                seccion('Detalle del grupo');
+                fila('Código', ficha.c);
+                fila('Especie', ficha.e || '-');
+                fila('Año', ficha.y != null ? String(ficha.y) : '-');
+                fila('Centro origen', ficha.ce || '-');
+                fila('Empresa', ficha.em || '-');
+
+                // Alimentación y tratamientos
+                seccion('Alimentación y tratamientos');
+                if (ficha.a) {
+                    fila('Alimento total', formatoKg(ficha.a.t) + ' kg');
+                    var tieneMedicada = ficha.a.m > 0;
+                    fila('Alimentación medicada',
+                        tieneMedicada ? formatoKg(ficha.a.m) + ' kg (' + formatoPorcentaje(ficha.a.p) + '%)' : 'No',
+                        tieneMedicada ? COLOR_WARNING : COLOR_OK);
+                    if (ficha.a.md && ficha.a.md.length > 0) {
+                        fila('Medicamentos en dieta', ficha.a.md.join(', '), COLOR_WARNING);
+                    }
+                } else {
+                    fila('Alimento total', 'Sin registro');
+                }
+
+                if (ficha.tr) {
+                    fila('Antiparasitarios', ficha.tr.ap ? 'Sí (' + ficha.tr.n + ' aplicaciones)' : 'Sin registro');
+                    fila('Antibióticos', ficha.tr.ab ? 'Registrados' : 'Sin registro',
+                        ficha.tr.ab ? COLOR_WARNING : COLOR_OK);
+                    (ficha.tr.i || []).forEach(function (tratamiento) {
+                        var inicio = tratamiento[2];
+                        var fin = tratamiento[3];
+                        var periodo = inicio ? ' · ' + inicio + (fin && fin !== inicio ? ' a ' + fin : '') : '';
+                        fila('  ' + (tratamiento[0] || 'Tratamiento'), (tratamiento[1] || '-') + periodo);
+                    });
+                }
+
+                // Cadena de trazabilidad
+                seccion('Cadena de trazabilidad');
+                var estados = {
+                    c: [COLOR_OK, 'Completado'],
+                    e: [COLOR_WARNING, 'En curso'],
+                    p: [COLOR_PENDING, 'Pendiente']
+                };
+                (ficha.tl || []).forEach(function (step, index) {
+                    var etiqueta = step[0];
+                    var estado = estados[step[1]] || estados.p;
+                    var detalleLineas = step[2] ? cortar(step[2], 9.5, CONTENT_WIDTH - 130) : [];
+                    var fecha = step[3];
+                    var alto = 22 + detalleLineas.length * 13;
+                    asegurarEspacio(alto);
+
+                    doc.setFillColor(estado[0]);
+                    doc.circle(MARGIN + 9, cursorY + 9, 9, 'F');
+                    texto(String(index + 1), MARGIN + 9, cursorY + 12.5, 9, true, '#FFFFFF', { align: 'center' });
+                    if (index < ficha.tl.length - 1) rect(MARGIN + 8.25, cursorY + 19, 1.5, alto - 20, COLOR_BORDER);
+
+                    texto(etiqueta, MARGIN + 28, cursorY + 12.5, 11, true, COLOR_TEXT);
+                    texto(estado[1], MARGIN + CONTENT_WIDTH, cursorY + 12.5, 9, true, estado[0], { align: 'right' });
+
+                    var lineaY = cursorY + 26;
+                    detalleLineas.forEach(function (lineaTexto) {
+                        texto(lineaTexto, MARGIN + 28, lineaY, 9.5, false, COLOR_MUTED);
+                        lineaY += 13;
+                    });
+                    if (fecha) texto(fecha, MARGIN + CONTENT_WIDTH, cursorY + 26, 9, false, COLOR_MUTED, { align: 'right' });
+
+                    cursorY += alto + 6;
+                });
+
+                // Certificaciones
+                if (ficha.ct && ficha.ct.length > 0) {
+                    seccion('Certificaciones');
+                    asegurarEspacio(26);
+                    var badgeX = MARGIN;
+                    ficha.ct.forEach(function (certificacion) {
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(10);
+                        var ancho = doc.getTextWidth(limpiar(certificacion)) + 20;
+                        rect(badgeX, cursorY, ancho, 20, '#E0ECFA');
+                        texto(certificacion, badgeX + 10, cursorY + 13.5, 10, true, COLOR_PRIMARY);
+                        badgeX += ancho + 8;
+                    });
+                    cursorY += 28;
+                }
+
+                // Pie
+                asegurarEspacio(30);
+                cursorY += 14;
+                linea(MARGIN, cursorY, MARGIN + CONTENT_WIDTH, cursorY);
+                texto('Ficha generada el ' + (ficha.g || '-') + ' · DigitalEcosystem Trazabilidad',
+                    MARGIN, cursorY + 14, 8, false, COLOR_MUTED);
+
+                return doc;
+            }
+
+            function iniciar() {
+                var fragmento = window.location.hash.replace(/^#/, '');
+                if (!fragmento) {
+                    mostrarError('Escanea el código QR de un grupo de peces para ver su ficha.');
+                    return;
+                }
+                if (!window.pako || !window.jspdf) {
+                    mostrarError('No se pudieron cargar los componentes del visor. Revisa tu conexión e inténtalo de nuevo.');
+                    return;
+                }
+
+                var ficha;
+                try {
+                    ficha = decodificarPayload(fragmento);
+                } catch (error) {
+                    mostrarError();
+                    return;
+                }
+                if (!ficha || ficha.v !== 1 || !ficha.c) {
+                    mostrarError();
+                    return;
+                }
+
+                var nombreArchivo = 'Trazabilidad_' + String(ficha.c).replace(/[^\w-]+/g, '_') + '.pdf';
+                document.title = 'Ficha ' + ficha.c;
+
+                var doc;
+                try {
+                    doc = generarPdf(ficha);
+                } catch (error) {
+                    mostrarError('Ocurrió un error al generar el PDF.');
+                    return;
+                }
+
+                var blob = doc.output('blob');
+                var pdfFile = new File([blob], nombreArchivo, { type: 'application/pdf' });
+                var pdfUrl = URL.createObjectURL(pdfFile);
+
+                document.getElementById('titulo-listo').textContent = 'Ficha ' + ficha.c;
+                document.getElementById('btn-abrir').href = pdfUrl;
+                var botonDescargar = document.getElementById('btn-descargar');
+                botonDescargar.href = pdfUrl;
+                botonDescargar.download = nombreArchivo;
+                mostrar('estado-listo');
+
+                // Abre el PDF en el visor nativo del navegador. replace() evita que "Atrás"
+                // vuelva al visor y lo regenere en bucle. Si el navegador bloquea la
+                // navegación, queda la tarjeta con los botones.
+                window.location.replace(pdfUrl);
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', iniciar);
+            } else {
+                iniciar();
+            }
+        })();
+    </script>
+</body>
+</html>
