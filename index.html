@@ -43,10 +43,32 @@
         }
         .btn--secondary { background: transparent; color: var(--brand); border: 1.5px solid var(--brand); }
         [hidden] { display: none !important; }
+
+        /* Vista del PDF renderizado dentro de la página */
+        body.con-pdf { display: block; padding: 0; background: #525659; }
+        .toolbar {
+            position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+            padding: 10px 12px; background: var(--brand); color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+        }
+        .toolbar__titulo { flex: 1; min-width: 0; font-size: .95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .toolbar .btn { padding: 8px 12px; font-size: .85rem; background: #FFFFFF; color: var(--brand); white-space: nowrap; }
+        .toolbar .btn--secondary { background: transparent; color: #FFFFFF; border-color: #FFFFFF; }
+        .paginas { max-width: 820px; margin: 0 auto; padding: 12px; }
+        .paginas canvas { display: block; width: 100%; height: auto; margin: 0 auto 12px; background: #FFFFFF; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
     </style>
 </head>
 <body>
-    <main class="card">
+    <div id="vista-pdf" hidden>
+        <header class="toolbar">
+            <span id="toolbar-titulo" class="toolbar__titulo">Ficha de Trazabilidad</span>
+            <a id="toolbar-abrir" class="btn" href="#" target="_blank" rel="noopener">Abrir</a>
+            <a id="toolbar-descargar" class="btn btn--secondary" href="#">Descargar</a>
+        </header>
+        <div id="paginas" class="paginas"></div>
+    </div>
+
+    <main id="tarjeta" class="card">
         <div class="card__brand"></div>
 
         <section id="estado-cargando">
@@ -57,9 +79,9 @@
 
         <section id="estado-listo" hidden>
             <h1 id="titulo-listo">Ficha lista</h1>
-            <p>Si el PDF no se abrió solo, tócalo aquí.</p>
+            <p>Toca para ver la ficha en PDF.</p>
             <div class="actions">
-                <a id="btn-abrir" class="btn" href="#">Abrir PDF</a>
+                <a id="btn-abrir" class="btn" href="#" target="_blank" rel="noopener">Abrir PDF</a>
                 <a id="btn-descargar" class="btn btn--secondary" href="#">Descargar PDF</a>
             </div>
         </section>
@@ -72,6 +94,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
         (function () {
             'use strict';
@@ -329,21 +352,64 @@
                     return;
                 }
 
-                var blob = doc.output('blob');
-                var pdfFile = new File([blob], nombreArchivo, { type: 'application/pdf' });
+                var pdfBytes = doc.output('arraybuffer');
+                var pdfFile = new File([pdfBytes], nombreArchivo, { type: 'application/pdf' });
                 var pdfUrl = URL.createObjectURL(pdfFile);
 
+                ['btn-abrir', 'toolbar-abrir'].forEach(function (id) {
+                    document.getElementById(id).href = pdfUrl;
+                });
+                ['btn-descargar', 'toolbar-descargar'].forEach(function (id) {
+                    var enlace = document.getElementById(id);
+                    enlace.href = pdfUrl;
+                    enlace.download = nombreArchivo;
+                });
                 document.getElementById('titulo-listo').textContent = 'Ficha ' + ficha.c;
-                document.getElementById('btn-abrir').href = pdfUrl;
-                var botonDescargar = document.getElementById('btn-descargar');
-                botonDescargar.href = pdfUrl;
-                botonDescargar.download = nombreArchivo;
-                mostrar('estado-listo');
+                document.getElementById('toolbar-titulo').textContent = 'Ficha ' + ficha.c;
 
-                // Abre el PDF en el visor nativo del navegador. replace() evita que "Atrás"
-                // vuelva al visor y lo regenere en bucle. Si el navegador bloquea la
-                // navegación, queda la tarjeta con los botones.
-                window.location.replace(pdfUrl);
+                // El PDF se muestra dentro de la página (pdf.js) en vez de navegar al blob:
+                // Safari de iOS deja colgada la navegación de nivel superior a un blob, porque
+                // libera la URL al descargar la página que la creó. "Abrir" lo lleva al visor
+                // nativo en otra pestaña, donde la página original sigue viva.
+                renderizarPdf(pdfBytes).catch(function () {
+                    // Sin pdf.js (CDN bloqueado, navegador antiguo) queda la tarjeta con botones.
+                    mostrar('estado-listo');
+                });
+            }
+
+            function renderizarPdf(pdfBytes) {
+                if (!window.pdfjsLib) return Promise.reject(new Error('pdf.js no disponible'));
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+                var contenedor = document.getElementById('paginas');
+                // pdf.js se queda con el buffer que recibe; se le pasa una copia.
+                return window.pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes.slice(0)) }).promise
+                    .then(function (documentoPdf) {
+                        document.getElementById('tarjeta').hidden = true;
+                        document.getElementById('vista-pdf').hidden = false;
+                        document.body.classList.add('con-pdf');
+
+                        var anchoDisponible = Math.min(contenedor.clientWidth - 24, 796);
+                        var densidad = Math.min(window.devicePixelRatio || 1, 3);
+                        var cadena = Promise.resolve();
+                        for (var numeroPagina = 1; numeroPagina <= documentoPdf.numPages; numeroPagina++) {
+                            cadena = cadena.then(renderizarPagina.bind(null, documentoPdf, numeroPagina, anchoDisponible, densidad, contenedor));
+                        }
+                        return cadena;
+                    });
+            }
+
+            function renderizarPagina(documentoPdf, numeroPagina, anchoDisponible, densidad, contenedor) {
+                return documentoPdf.getPage(numeroPagina).then(function (pagina) {
+                    var escala = anchoDisponible / pagina.getViewport({ scale: 1 }).width * densidad;
+                    var viewport = pagina.getViewport({ scale: escala });
+                    var canvas = document.createElement('canvas');
+                    canvas.width = Math.floor(viewport.width);
+                    canvas.height = Math.floor(viewport.height);
+                    contenedor.appendChild(canvas);
+                    return pagina.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+                });
             }
 
             if (document.readyState === 'loading') {
