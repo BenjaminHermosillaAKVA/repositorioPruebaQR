@@ -11,28 +11,34 @@
         después del "#": deflate-raw + base64url de un JSON compacto (ver construirPayloadQr
         en qr-grupo-traceability.component.ts). El fragmento nunca se envía al servidor,
         así que la página no recibe ni guarda datos: solo arma el PDF en el teléfono.
+
+        Diseño: propuesta "D · Combinado" (colores akvarell, Hanken Grotesk, íconos AKVA_icons).
+        Las medidas del dibujo están en px del diseño (A4 = 794 × 1123 px) y se pasan a
+        puntos PDF con K = 0,75.
     -->
     <style>
-        :root { --brand: #0E4C92; --text: #1F2937; --muted: #6B7280; --bg: #F3F4F6; --card: #FFFFFF; }
+        @font-face { font-family: "Hanken Grotesk"; font-weight: 400; src: url("fonts/HankenGrotesk-Regular.ttf") format("truetype"); }
+        @font-face { font-family: "Hanken Grotesk"; font-weight: 600; src: url("fonts/HankenGrotesk-SemiBold.ttf") format("truetype"); }
+        :root { --brand: #175566; --brand-dark: #18353d; --text: #161a1c; --muted: #4b7891; --bg: #eef2f6; --card: #FFFFFF; }
         @media (prefers-color-scheme: dark) {
-            :root { --text: #E5E7EB; --muted: #9CA3AF; --bg: #111827; --card: #1F2937; }
+            :root { --text: #e0e9f0; --muted: #8bd7f3; --bg: #19272b; --card: #18353d; }
         }
         * { box-sizing: border-box; }
         body {
             margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
             padding: 16px; background: var(--bg); color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         }
         .card {
             width: 100%; max-width: 380px; padding: 28px 24px; border-radius: 14px; text-align: center;
             background: var(--card); box-shadow: 0 6px 24px rgba(0, 0, 0, .08);
         }
-        .card__brand { height: 6px; margin: -28px -24px 22px; border-radius: 14px 14px 0 0; background: var(--brand); }
+        .card__brand { height: 6px; margin: -28px -24px 22px; border-radius: 14px 14px 0 0; background: var(--brand-dark); }
         h1 { margin: 0 0 6px; font-size: 1.15rem; }
         p { margin: 0 0 18px; color: var(--muted); font-size: .92rem; line-height: 1.4; }
         .spinner {
             width: 34px; height: 34px; margin: 0 auto 16px; border-radius: 50%;
-            border: 3px solid rgba(14, 76, 146, .2); border-top-color: var(--brand);
+            border: 3px solid rgba(23, 85, 102, .2); border-top-color: var(--brand);
             animation: spin .8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -48,11 +54,11 @@
         body.con-pdf { display: block; padding: 0; background: #525659; }
         .toolbar {
             position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
-            padding: 10px 12px; background: var(--brand); color: #FFFFFF;
+            padding: 10px 12px; background: var(--brand-dark); color: #FFFFFF;
             box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
         }
         .toolbar__titulo { flex: 1; min-width: 0; font-size: .95rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .toolbar .btn { padding: 8px 12px; font-size: .85rem; background: #FFFFFF; color: var(--brand); white-space: nowrap; }
+        .toolbar .btn { padding: 8px 12px; font-size: .85rem; background: #FFFFFF; color: var(--brand-dark); white-space: nowrap; }
         .toolbar .btn--secondary { background: transparent; color: #FFFFFF; border-color: #FFFFFF; }
         .paginas { max-width: 820px; margin: 0 auto; padding: 12px; }
         .paginas canvas { display: block; width: 100%; height: auto; margin: 0 auto 12px; background: #FFFFFF; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
@@ -99,18 +105,40 @@
         (function () {
             'use strict';
 
-            var COLOR_PRIMARY = '#0E4C92';
-            var COLOR_TEXT = '#1F2937';
-            var COLOR_MUTED = '#6B7280';
-            var COLOR_BORDER = '#E5E7EB';
-            var COLOR_OK = '#16A34A';
-            var COLOR_WARNING = '#D97706';
-            var COLOR_PENDING = '#9CA3AF';
+            // ── Paleta akvarell (oklch convertido a hex) ──
+            var C = {
+                brand: '#175566',        // brand-600
+                brandDark: '#18353d',    // brand-700
+                brand500: '#157e99',
+                accent: '#32b1d6',       // brand-400
+                brand300: '#8bd7f3',
+                brand200: '#d5edf6',
+                brand150: '#e9f4f9',
+                text: '#161a1c',         // neutral-900
+                text2: '#345161',        // neutral-600
+                muted: '#4b7891',        // neutral-500
+                border: '#e0e9f0',       // neutral-200
+                borderStrong: '#ccdee9', // neutral-250
+                row: '#eef2f6',          // neutral-150
+                surface: '#f7f9fa',      // neutral-100
+                dashed: '#6faacc',       // neutral-400
+                okBg: '#e4f8ea', okText: '#255a36', ok: '#328450',
+                warnBg: '#f7f2dd', warnText: '#5a4c21', warnPill: '#e2c973',
+                white: '#FFFFFF'
+            };
 
-            var PAGE_WIDTH = 595.28;
-            var PAGE_HEIGHT = 841.89;
-            var MARGIN = 40;
-            var CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+            // ── Geometría del diseño (px) ──
+            var K = 0.75;                 // px del diseño -> pt del PDF
+            var PAGE_W = 794;
+            var PAGE_H = 1123;
+            var MARGIN = 48;
+            var CONTENT_W = PAGE_W - MARGIN * 2;
+            var FOOTER_LINE_Y = 1043;
+            var CONTENT_BOTTOM = FOOTER_LINE_Y - 20;
+            var LOGO_RATIO = 187 / 32;
+
+            var ICONOS = ['cage', 'feed', 'cosecha', 'ship', 'planta', 'empaque', 'fishes', 'calidad'];
+            var ICONO_POR_PASO = ['cage', 'feed', 'cosecha', 'ship', 'planta', 'empaque'];
 
             function mostrar(idEstado) {
                 ['estado-cargando', 'estado-listo', 'estado-error'].forEach(function (id) {
@@ -133,188 +161,670 @@
                 return JSON.parse(pako.inflateRaw(bytes, { to: 'string' }));
             }
 
-            function formatoKg(valor) {
-                return Math.round(valor || 0).toLocaleString('es-CL');
+            // ── Recursos: fuentes TTF e íconos SVG rasterizados ──
+
+            function arrayBufferABase64(buffer) {
+                var bytes = new Uint8Array(buffer);
+                var binario = '';
+                for (var inicio = 0; inicio < bytes.length; inicio += 0x8000) {
+                    binario += String.fromCharCode.apply(null, bytes.subarray(inicio, inicio + 0x8000));
+                }
+                return btoa(binario);
             }
 
-            function formatoPorcentaje(valor) {
-                return (valor || 0).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            function cargarFuente(archivo) {
+                return fetch('fonts/' + archivo).then(function (respuesta) {
+                    if (!respuesta.ok) throw new Error('Fuente no disponible: ' + archivo);
+                    return respuesta.arrayBuffer();
+                }).then(arrayBufferABase64);
             }
 
-            // Las fuentes estándar de jsPDF no traen el guion largo.
-            function limpiar(texto) {
-                return String(texto == null ? '' : texto).replace(/[—–]/g, '-');
+            function rasterizarSvg(nombre, ancho, alto) {
+                return new Promise(function (resolver, rechazar) {
+                    var imagen = new Image();
+                    imagen.onload = function () {
+                        var escala = 4;
+                        var canvas = document.createElement('canvas');
+                        canvas.width = Math.round(ancho * escala);
+                        canvas.height = Math.round(alto * escala);
+                        canvas.getContext('2d').drawImage(imagen, 0, 0, canvas.width, canvas.height);
+                        resolver(canvas.toDataURL('image/png'));
+                    };
+                    imagen.onerror = rechazar;
+                    imagen.src = 'icons/' + nombre + '.svg';
+                });
             }
 
-            function generarPdf(ficha) {
-                var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
-                var cursorY = 0;
+            function cargarRecursos() {
+                var fuentes = Promise.all([
+                    cargarFuente('HankenGrotesk-Regular.ttf'),
+                    cargarFuente('HankenGrotesk-SemiBold.ttf'),
+                    cargarFuente('HankenGrotesk-Bold.ttf')
+                ]).catch(function () { return null; });
 
-                function texto(valor, x, y, tamano, negrita, color, opciones) {
-                    doc.setFont('helvetica', negrita ? 'bold' : 'normal');
-                    doc.setFontSize(tamano);
-                    doc.setTextColor(color || COLOR_TEXT);
-                    doc.text(limpiar(valor), x, y, opciones || {});
-                }
-
-                function rect(x, y, ancho, alto, color) {
-                    doc.setFillColor(color);
-                    doc.rect(x, y, ancho, alto, 'F');
-                }
-
-                function linea(x1, y1, x2, y2) {
-                    doc.setDrawColor(COLOR_BORDER);
-                    doc.setLineWidth(0.75);
-                    doc.line(x1, y1, x2, y2);
-                }
-
-                function cortar(valor, tamano, anchoMaximo) {
-                    doc.setFont('helvetica', 'normal');
-                    doc.setFontSize(tamano);
-                    return doc.splitTextToSize(limpiar(valor), anchoMaximo);
-                }
-
-                function asegurarEspacio(alto) {
-                    if (cursorY + alto <= PAGE_HEIGHT - MARGIN) return;
-                    doc.addPage();
-                    cursorY = MARGIN;
-                }
-
-                function seccion(titulo) {
-                    asegurarEspacio(40);
-                    cursorY += 10;
-                    texto(titulo, MARGIN, cursorY + 12, 13, true, COLOR_PRIMARY);
-                    cursorY += 20;
-                    linea(MARGIN, cursorY, MARGIN + CONTENT_WIDTH, cursorY);
-                    cursorY += 10;
-                }
-
-                function fila(etiqueta, valor, colorValor) {
-                    var lineas = cortar(valor || '-', 10, CONTENT_WIDTH - 150);
-                    asegurarEspacio(lineas.length * 14 + 4);
-                    texto(etiqueta, MARGIN, cursorY + 10, 10, false, COLOR_MUTED);
-                    lineas.forEach(function (lineaTexto) {
-                        texto(lineaTexto, MARGIN + 150, cursorY + 10, 10, true, colorValor || COLOR_TEXT);
-                        cursorY += 14;
+                var imagenes = {};
+                var tareas = [];
+                ICONOS.forEach(function (icono) {
+                    ['white', 'brand'].forEach(function (variante) {
+                        var clave = icono + '-' + variante;
+                        tareas.push(rasterizarSvg('ic-' + clave, 24, 24)
+                            .then(function (dataUrl) { imagenes[clave] = dataUrl; })
+                            .catch(function () { /* sin ícono: el PDF sale igual */ }));
                     });
-                    cursorY += 2;
-                }
-
-                // Encabezado
-                rect(0, 0, PAGE_WIDTH, 96, COLOR_PRIMARY);
-                texto('Ficha de Trazabilidad', MARGIN, 38, 20, true, '#FFFFFF');
-                texto('Grupo de peces', MARGIN, 60, 11, false, '#C7DBF5');
-
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(12);
-                var anchoCodigo = doc.getTextWidth(limpiar(ficha.c)) + 24;
-                var codigoX = PAGE_WIDTH - MARGIN - anchoCodigo;
-                rect(codigoX, 30, anchoCodigo, 26, '#FFFFFF');
-                texto(ficha.c, codigoX + 12, 47.5, 12, true, COLOR_PRIMARY);
-
-                var subtitulo = [ficha.e, ficha.ce].filter(Boolean).join(' · ');
-                if (subtitulo) texto(subtitulo, MARGIN, 82, 10, false, '#FFFFFF');
-
-                cursorY = 110;
-                if (ficha.a && ficha.a.m > 0) {
-                    rect(MARGIN, cursorY, CONTENT_WIDTH, 26, '#FEF3C7');
-                    rect(MARGIN, cursorY, 3, 26, COLOR_WARNING);
-                    texto('Alimentación medicada: ' + formatoPorcentaje(ficha.a.p) + '% del total',
-                        MARGIN + 12, cursorY + 17, 10, true, '#92400E');
-                    cursorY += 34;
-                }
-
-                // Detalle del grupo
-                seccion('Detalle del grupo');
-                fila('Código', ficha.c);
-                fila('Especie', ficha.e || '-');
-                fila('Año', ficha.y != null ? String(ficha.y) : '-');
-                fila('Centro origen', ficha.ce || '-');
-                fila('Empresa', ficha.em || '-');
-
-                // Alimentación y tratamientos
-                seccion('Alimentación y tratamientos');
-                if (ficha.a) {
-                    fila('Alimento total', formatoKg(ficha.a.t) + ' kg');
-                    var tieneMedicada = ficha.a.m > 0;
-                    fila('Alimentación medicada',
-                        tieneMedicada ? formatoKg(ficha.a.m) + ' kg (' + formatoPorcentaje(ficha.a.p) + '%)' : 'No',
-                        tieneMedicada ? COLOR_WARNING : COLOR_OK);
-                    if (ficha.a.md && ficha.a.md.length > 0) {
-                        fila('Medicamentos en dieta', ficha.a.md.join(', '), COLOR_WARNING);
-                    }
-                } else {
-                    fila('Alimento total', 'Sin registro');
-                }
-
-                if (ficha.tr) {
-                    fila('Antiparasitarios', ficha.tr.ap ? 'Sí (' + ficha.tr.n + ' aplicaciones)' : 'Sin registro');
-                    fila('Antibióticos', ficha.tr.ab ? 'Registrados' : 'Sin registro',
-                        ficha.tr.ab ? COLOR_WARNING : COLOR_OK);
-                    (ficha.tr.i || []).forEach(function (tratamiento) {
-                        var inicio = tratamiento[2];
-                        var fin = tratamiento[3];
-                        var periodo = inicio ? ' · ' + inicio + (fin && fin !== inicio ? ' a ' + fin : '') : '';
-                        fila('  ' + (tratamiento[0] || 'Tratamiento'), (tratamiento[1] || '-') + periodo);
-                    });
-                }
-
-                // Cadena de trazabilidad
-                seccion('Cadena de trazabilidad');
-                var estados = {
-                    c: [COLOR_OK, 'Completado'],
-                    e: [COLOR_WARNING, 'En curso'],
-                    p: [COLOR_PENDING, 'Pendiente']
-                };
-                (ficha.tl || []).forEach(function (step, index) {
-                    var etiqueta = step[0];
-                    var estado = estados[step[1]] || estados.p;
-                    var detalleLineas = step[2] ? cortar(step[2], 9.5, CONTENT_WIDTH - 130) : [];
-                    var fecha = step[3];
-                    var alto = 22 + detalleLineas.length * 13;
-                    asegurarEspacio(alto);
-
-                    doc.setFillColor(estado[0]);
-                    doc.circle(MARGIN + 9, cursorY + 9, 9, 'F');
-                    texto(String(index + 1), MARGIN + 9, cursorY + 12.5, 9, true, '#FFFFFF', { align: 'center' });
-                    if (index < ficha.tl.length - 1) rect(MARGIN + 8.25, cursorY + 19, 1.5, alto - 20, COLOR_BORDER);
-
-                    texto(etiqueta, MARGIN + 28, cursorY + 12.5, 11, true, COLOR_TEXT);
-                    texto(estado[1], MARGIN + CONTENT_WIDTH, cursorY + 12.5, 9, true, estado[0], { align: 'right' });
-
-                    var lineaY = cursorY + 26;
-                    detalleLineas.forEach(function (lineaTexto) {
-                        texto(lineaTexto, MARGIN + 28, lineaY, 9.5, false, COLOR_MUTED);
-                        lineaY += 13;
-                    });
-                    if (fecha) texto(fecha, MARGIN + CONTENT_WIDTH, cursorY + 26, 9, false, COLOR_MUTED, { align: 'right' });
-
-                    cursorY += alto + 6;
+                });
+                ['white', 'brand'].forEach(function (variante) {
+                    tareas.push(rasterizarSvg('logo-akva-' + variante, 187, 32)
+                        .then(function (dataUrl) { imagenes['logo-' + variante] = dataUrl; })
+                        .catch(function () { /* sin logo */ }));
                 });
 
-                // Certificaciones
-                if (ficha.ct && ficha.ct.length > 0) {
-                    seccion('Certificaciones');
-                    asegurarEspacio(26);
-                    var badgeX = MARGIN;
-                    ficha.ct.forEach(function (certificacion) {
-                        doc.setFont('helvetica', 'bold');
-                        doc.setFontSize(10);
-                        var ancho = doc.getTextWidth(limpiar(certificacion)) + 20;
-                        rect(badgeX, cursorY, ancho, 20, '#E0ECFA');
-                        texto(certificacion, badgeX + 10, cursorY + 13.5, 10, true, COLOR_PRIMARY);
-                        badgeX += ancho + 8;
-                    });
-                    cursorY += 28;
+                return Promise.all([fuentes, Promise.all(tareas)]).then(function (resultado) {
+                    return { fuentes: resultado[0], imagenes: imagenes };
+                });
+            }
+
+            // ── Formato ──
+
+            function numero(valor, decimales) {
+                if (valor == null || isNaN(valor)) return '—';
+                return Number(valor).toLocaleString('es-CL', {
+                    minimumFractionDigits: decimales || 0, maximumFractionDigits: decimales || 0
+                });
+            }
+
+            function kg(valor) { return valor == null ? '—' : numero(Math.round(valor)) + ' kg'; }
+
+            function porcentaje(parte, total) {
+                if (!total) return '—';
+                return numero(parte / total * 100, 1);
+            }
+
+            // yyyy-MM-dd -> dd-MM-yyyy (las fechas de cosecha ya vienen en dd-MM-yyyy).
+            function fecha(valor) {
+                if (!valor) return null;
+                var partes = /^(\d{4})-(\d{2})-(\d{2})/.exec(valor);
+                return partes ? partes[3] + '-' + partes[2] + '-' + partes[1] : valor;
+            }
+
+            function anioClase(valor) {
+                if (valor == null) return '—';
+                return valor < 100 ? String(2000 + valor) : String(valor);
+            }
+
+            function texto(valor) {
+                return valor == null || valor === '' ? '—' : String(valor);
+            }
+
+            // ── Dibujo ──
+
+            function crearLienzo(recursos) {
+                var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+                var familia = 'helvetica';
+                if (recursos.fuentes) {
+                    doc.addFileToVFS('HG-Regular.ttf', recursos.fuentes[0]);
+                    doc.addFileToVFS('HG-SemiBold.ttf', recursos.fuentes[1]);
+                    doc.addFileToVFS('HG-Bold.ttf', recursos.fuentes[2]);
+                    doc.addFont('HG-Regular.ttf', 'HG', 'normal');
+                    doc.addFont('HG-SemiBold.ttf', 'HGSemi', 'normal');
+                    doc.addFont('HG-Bold.ttf', 'HG', 'bold');
+                    familia = 'HG';
                 }
 
-                // Pie
-                asegurarEspacio(30);
-                cursorY += 14;
-                linea(MARGIN, cursorY, MARGIN + CONTENT_WIDTH, cursorY);
-                texto('Ficha generada el ' + (ficha.g || '-') + ' · DigitalEcosystem Trazabilidad',
-                    MARGIN, cursorY + 14, 8, false, COLOR_MUTED);
+                function usarFuente(peso, tamano) {
+                    if (familia === 'HG') {
+                        if (peso === 'semibold') doc.setFont('HGSemi', 'normal');
+                        else doc.setFont('HG', peso === 'bold' ? 'bold' : 'normal');
+                    } else {
+                        doc.setFont('helvetica', peso === 'normal' || !peso ? 'normal' : 'bold');
+                    }
+                    doc.setFontSize(tamano * K);
+                }
 
+                var lienzo = {
+                    doc: doc,
+                    imagenes: recursos.imagenes,
+
+                    rect: function (x, y, ancho, alto, color, radio) {
+                        doc.setFillColor(color);
+                        if (radio) doc.roundedRect(x * K, y * K, ancho * K, alto * K, radio * K, radio * K, 'F');
+                        else doc.rect(x * K, y * K, ancho * K, alto * K, 'F');
+                    },
+
+                    borde: function (x, y, ancho, alto, color, radio, grosor) {
+                        doc.setDrawColor(color);
+                        doc.setLineWidth((grosor || 1) * K);
+                        if (radio) doc.roundedRect(x * K, y * K, ancho * K, alto * K, radio * K, radio * K, 'S');
+                        else doc.rect(x * K, y * K, ancho * K, alto * K, 'S');
+                    },
+
+                    linea: function (x1, y1, x2, y2, color, grosor) {
+                        doc.setDrawColor(color);
+                        doc.setLineWidth((grosor || 1) * K);
+                        doc.line(x1 * K, y1 * K, x2 * K, y2 * K);
+                    },
+
+                    circulo: function (cx, cy, radio, relleno, bordeDiscontinuo) {
+                        doc.setFillColor(relleno);
+                        doc.circle(cx * K, cy * K, radio * K, 'F');
+                        if (bordeDiscontinuo) {
+                            doc.setDrawColor(bordeDiscontinuo);
+                            doc.setLineWidth(2 * K);
+                            doc.setLineDashPattern([4 * K, 3 * K], 0);
+                            doc.circle(cx * K, cy * K, (radio - 1) * K, 'S');
+                            doc.setLineDashPattern([], 0);
+                        }
+                    },
+
+                    imagen: function (clave, x, y, ancho, alto) {
+                        var dataUrl = recursos.imagenes[clave];
+                        if (!dataUrl) return;
+                        doc.addImage(dataUrl, 'PNG', x * K, y * K, ancho * K, alto * K, clave, 'FAST');
+                    },
+
+                    // y = centro vertical de la línea de texto.
+                    texto: function (valor, x, y, opciones) {
+                        opciones = opciones || {};
+                        usarFuente(opciones.peso, opciones.tamano || 13);
+                        doc.setTextColor(opciones.color || C.text);
+                        doc.text(String(valor), x * K, y * K, {
+                            align: opciones.alinear || 'left',
+                            baseline: 'middle',
+                            charSpace: opciones.espaciado ? opciones.espaciado * K : 0
+                        });
+                    },
+
+                    ancho: function (valor, tamano, peso, espaciado) {
+                        usarFuente(peso, tamano);
+                        var ancho = doc.getTextWidth(String(valor)) / K;
+                        if (espaciado) ancho += espaciado * String(valor).length;
+                        return ancho;
+                    },
+
+                    cortar: function (valor, tamano, peso, anchoMaximo) {
+                        usarFuente(peso, tamano);
+                        return doc.splitTextToSize(String(valor), anchoMaximo * K);
+                    },
+
+                    // Reduce el tamaño hasta que el texto cabe en el ancho.
+                    tamanoQueCabe: function (valor, tamano, peso, anchoMaximo, minimo) {
+                        var actual = tamano;
+                        while (actual > (minimo || 10) && lienzo.ancho(valor, actual, peso) > anchoMaximo) actual -= 0.5;
+                        return actual;
+                    },
+
+                    // Pastilla alineada a la derecha en xDerecha, centrada en y. Devuelve su ancho.
+                    pastilla: function (valor, xDerecha, y, fondo, colorTexto, tamano) {
+                        tamano = tamano || 12;
+                        var ancho = lienzo.ancho(valor, tamano, 'semibold') + 20;
+                        var alto = tamano + 8;
+                        lienzo.rect(xDerecha - ancho, y - alto / 2, ancho, alto, fondo, alto / 2);
+                        lienzo.texto(valor, xDerecha - ancho / 2, y, { tamano: tamano, peso: 'semibold', color: colorTexto, alinear: 'center' });
+                        return ancho;
+                    }
+                };
+                return lienzo;
+            }
+
+            // ── Secciones comunes ──
+
+            function encabezadoCompleto(lienzo, ficha) {
+                var alto = 163;
+                lienzo.rect(0, 0, PAGE_W, alto, C.brandDark);
+                lienzo.imagen('logo-white', MARGIN, 32, 22 * LOGO_RATIO, 22);
+                lienzo.texto('TRAZABILIDAD · GRUPO DE PECES', PAGE_W - MARGIN, 43,
+                    { tamano: 12, color: C.brand300, alinear: 'right', espaciado: 1 });
+
+                lienzo.texto('Ficha de Trazabilidad', MARGIN, 96, { tamano: 34, peso: 'bold', color: C.white });
+                var subtitulo = [ficha.e, ficha.ce, ficha.em].filter(Boolean).join(' · ');
+                if (subtitulo) lienzo.texto(subtitulo, MARGIN, 130, { tamano: 15, color: C.brand200 });
+
+                lienzo.texto('CÓDIGO DE GRUPO', PAGE_W - MARGIN, 80,
+                    { tamano: 11, color: C.brand300, alinear: 'right', espaciado: 0.9 });
+                var anchoCodigo = lienzo.ancho(ficha.c, 20, 'bold') + 32;
+                lienzo.rect(PAGE_W - MARGIN - anchoCodigo, 91, anchoCodigo, 44, C.white, 8);
+                lienzo.texto(ficha.c, PAGE_W - MARGIN - anchoCodigo / 2, 113,
+                    { tamano: 20, peso: 'bold', color: C.brandDark, alinear: 'center' });
+                return alto;
+            }
+
+            function encabezadoCompacto(lienzo, ficha) {
+                var alto = 63;
+                lienzo.rect(0, 0, PAGE_W, alto, C.brandDark);
+                var anchoLogo = 16 * LOGO_RATIO;
+                lienzo.imagen('logo-white', MARGIN, 23.5, anchoLogo, 16);
+                lienzo.rect(MARGIN + anchoLogo + 16, 22.5, 1, 18, C.text2);
+                lienzo.texto('Ficha de Trazabilidad', MARGIN + anchoLogo + 33, 31.5, { tamano: 14, peso: 'semibold', color: C.white });
+                var anchoCodigo = lienzo.ancho(ficha.c, 14, 'bold') + 24;
+                lienzo.rect(PAGE_W - MARGIN - anchoCodigo, 18, anchoCodigo, 27, C.white, 6);
+                lienzo.texto(ficha.c, PAGE_W - MARGIN - anchoCodigo / 2, 31.5,
+                    { tamano: 14, peso: 'bold', color: C.brandDark, alinear: 'center' });
+                return alto;
+            }
+
+            function pie(lienzo, ficha, pagina, totalPaginas) {
+                lienzo.linea(MARGIN, FOOTER_LINE_Y, PAGE_W - MARGIN, FOOTER_LINE_Y, C.border);
+                lienzo.texto('Emitido el ' + texto(ficha.g), MARGIN, FOOTER_LINE_Y + 26, { tamano: 11, peso: 'semibold', color: C.text2 });
+                lienzo.texto('Generado desde el código QR del grupo · DigitalEcosystem', MARGIN, FOOTER_LINE_Y + 42, { tamano: 11, color: C.muted });
+                var anchoLogo = 14 * LOGO_RATIO;
+                lienzo.imagen('logo-brand', PAGE_W - MARGIN - anchoLogo, FOOTER_LINE_Y + 35, anchoLogo, 14);
+                lienzo.texto('Página ' + pagina + ' de ' + totalPaginas, PAGE_W - MARGIN - anchoLogo - 12, FOOTER_LINE_Y + 42,
+                    { tamano: 11, color: C.muted, alinear: 'right' });
+            }
+
+            // Título de sección con ícono y línea inferior. Devuelve el y siguiente.
+            function tituloSeccion(lienzo, y, icono, titulo, textoDerecha) {
+                lienzo.imagen(icono + '-brand', MARGIN, y, 22, 22);
+                lienzo.texto(titulo, MARGIN + 32, y + 11, { tamano: 17, peso: 'semibold', color: C.brand });
+                if (textoDerecha) lienzo.texto(textoDerecha, PAGE_W - MARGIN, y + 11, { tamano: 12, color: C.text2, alinear: 'right' });
+                lienzo.linea(MARGIN, y + 30, PAGE_W - MARGIN, y + 30, C.border);
+                return y + 46;
+            }
+
+            function subtituloSeccion(lienzo, y, icono, titulo) {
+                lienzo.imagen(icono + '-brand', MARGIN, y, 20, 20);
+                lienzo.texto(titulo, MARGIN + 30, y + 10, { tamano: 15, peso: 'semibold', color: C.brand });
+                return y + 32;
+            }
+
+            // Fila de tarjetas de resumen. items: { etiqueta, valor, alerta }
+            function tarjetasResumen(lienzo, y, items) {
+                var espacio = 12;
+                var ancho = (CONTENT_W - espacio * (items.length - 1)) / items.length;
+                items.forEach(function (item, index) {
+                    var x = MARGIN + index * (ancho + espacio);
+                    lienzo.rect(x, y, ancho, 76, item.alerta ? C.warnBg : C.brand150, 10);
+                    lienzo.texto(item.etiqueta, x + 16, y + 22, { tamano: 12, color: item.alerta ? C.warnText : C.text2 });
+                    var tamano = lienzo.tamanoQueCabe(item.valor, 20, 'bold', ancho - 32, 12);
+                    lienzo.texto(item.valor, x + 16, y + 50, { tamano: tamano, peso: 'bold', color: item.alerta ? C.warnText : C.brandDark });
+                });
+                return y + 76;
+            }
+
+            function mensajeVacio(lienzo, y, mensaje) {
+                lienzo.rect(MARGIN, y, CONTENT_W, 48, C.surface, 10);
+                lienzo.texto(mensaje, PAGE_W / 2, y + 24, { tamano: 13, color: C.muted, alinear: 'center' });
+                return y + 48;
+            }
+
+            // Tabla con salto de página automático. columnas: { titulo, peso (fracción), alinear }.
+            // filas: { celdas: [texto | { pastilla, fondo, color }], estilo: 'alerta' | 'total' | 'suave' | 'nota' }
+            function tabla(lienzo, y, columnas, filas, opciones) {
+                opciones = opciones || {};
+                var tamano = opciones.tamano || 12;
+                var tamanoCabecera = opciones.tamanoCabecera || 11;
+                var relleno = 14;
+                var espacio = opciones.espacio || 12;
+                var interlineado = tamano + 3;
+                var sumaPesos = columnas.reduce(function (suma, columna) { return suma + columna.peso; }, 0);
+                var anchoUtil = CONTENT_W - relleno * 2 - espacio * (columnas.length - 1);
+                var anchos = columnas.map(function (columna) { return anchoUtil * columna.peso / sumaPesos; });
+                var inicioTramo = y;
+
+                function xColumna(index) {
+                    var x = MARGIN + relleno;
+                    for (var anterior = 0; anterior < index; anterior++) x += anchos[anterior] + espacio;
+                    return x;
+                }
+
+                function cabecera() {
+                    lienzo.rect(MARGIN, y, CONTENT_W, 34, C.surface);
+                    columnas.forEach(function (columna, index) {
+                        var x = columna.alinear === 'right' ? xColumna(index) + anchos[index] : xColumna(index);
+                        lienzo.texto(columna.titulo.toUpperCase(), x, y + 17,
+                            { tamano: tamanoCabecera, peso: 'semibold', color: C.text2, alinear: columna.alinear || 'left', espaciado: 0.4 });
+                    });
+                    y += 34;
+                }
+
+                function cerrarTramo() {
+                    lienzo.borde(MARGIN, inicioTramo, CONTENT_W, y - inicioTramo, C.border, 8);
+                }
+
+                cabecera();
+                filas.forEach(function (fila) {
+                    var estilo = fila.estilo;
+                    var peso = estilo === 'total' ? 'bold' : null;
+                    var lineasPorCelda = fila.celdas.map(function (celda, index) {
+                        if (celda && typeof celda === 'object') return [celda.pastilla];
+                        if (celda === '') return [''];
+                        var pesoCelda = peso || (columnas[index].negrita ? 'semibold' : 'normal');
+                        return estilo === 'nota' ? [texto(celda)] : lienzo.cortar(texto(celda), tamano, pesoCelda, anchos[index]);
+                    });
+                    var maxLineas = Math.max.apply(null, lineasPorCelda.map(function (lineas) { return lineas.length; }));
+                    var alto = maxLineas * interlineado + 18;
+
+                    if (y + alto > CONTENT_BOTTOM) {
+                        cerrarTramo();
+                        y = opciones.nuevaPagina();
+                        inicioTramo = y;
+                        cabecera();
+                    }
+
+                    var fondo = estilo === 'alerta' ? C.warnBg : estilo === 'total' ? C.brand150 : estilo === 'nota' ? C.surface : null;
+                    if (fondo) lienzo.rect(MARGIN + 0.5, y, CONTENT_W - 1, alto, fondo);
+                    lienzo.linea(MARGIN, y, PAGE_W - MARGIN, y, estilo === 'total' ? C.borderStrong : C.row);
+
+                    if (estilo === 'nota') {
+                        lienzo.texto(texto(fila.celdas[0]), PAGE_W / 2, y + alto / 2, { tamano: tamano, color: C.muted, alinear: 'center' });
+                    } else {
+                        fila.celdas.forEach(function (celda, index) {
+                            var columna = columnas[index];
+                            var x = xColumna(index);
+                            if (celda && typeof celda === 'object') {
+                                var anchoPastilla = lienzo.ancho(celda.pastilla, tamano - 1, 'semibold') + 16;
+                                lienzo.rect(x, y + alto / 2 - (tamano + 5) / 2, anchoPastilla, tamano + 5, celda.fondo, (tamano + 5) / 2);
+                                lienzo.texto(celda.pastilla, x + anchoPastilla / 2, y + alto / 2,
+                                    { tamano: tamano - 1, peso: 'semibold', color: celda.color, alinear: 'center' });
+                                return;
+                            }
+                            var colorCelda = estilo === 'alerta' ? C.warnText
+                                : estilo === 'total' ? C.brandDark
+                                : estilo === 'suave' ? C.muted
+                                : columna.color || C.text;
+                            var pesoCelda = peso || (columna.negrita ? 'semibold' : 'normal');
+                            var lineas = lineasPorCelda[index];
+                            var yInicial = y + alto / 2 - (lineas.length - 1) * interlineado / 2;
+                            lineas.forEach(function (linea, numeroLinea) {
+                                lienzo.texto(linea, columna.alinear === 'right' ? x + anchos[index] : x, yInicial + numeroLinea * interlineado,
+                                    { tamano: tamano, peso: pesoCelda, color: colorCelda, alinear: columna.alinear || 'left' });
+                            });
+                        });
+                    }
+                    y += alto;
+                });
+                cerrarTramo();
+                return y;
+            }
+
+            // ── Página 1: resumen ──
+
+            function paginaResumen(lienzo, ficha) {
+                var y = encabezadoCompleto(lienzo, ficha) + 28;
+                var pasos = ficha.tl || [];
+                var alimentacion = ficha.a;
+                var tratamientos = ficha.tr;
+                var cosecha = ficha.h;
+
+                // Tarjetas superiores
+                var biomasa = cosecha ? kg(cosecha.b) : (pasos[2] && pasos[2][2]) || '—';
+                var tarjetas = [
+                    { icono: 'fishes', etiqueta: 'Especie', valor: texto(ficha.e) },
+                    { icono: 'cage', etiqueta: 'Año clase', valor: anioClase(ficha.y) },
+                    { icono: 'feed', etiqueta: 'Alimento total', valor: alimentacion ? kg(alimentacion.t) : '—' },
+                    { icono: 'cosecha', etiqueta: 'Biomasa cosechada', valor: biomasa }
+                ];
+                var anchoTarjeta = (CONTENT_W - 36) / 4;
+                tarjetas.forEach(function (tarjeta, index) {
+                    var x = MARGIN + index * (anchoTarjeta + 12);
+                    lienzo.rect(x, y, anchoTarjeta, 100, C.brand150, 10);
+                    lienzo.imagen(tarjeta.icono + '-brand', x + 16, y + 14, 22, 22);
+                    lienzo.texto(tarjeta.etiqueta, x + 16, y + 52, { tamano: 12, color: C.text2 });
+                    var tamano = lienzo.tamanoQueCabe(tarjeta.valor, 17, 'semibold', anchoTarjeta - 32, 11);
+                    lienzo.texto(tarjeta.valor, x + 16, y + 76, { tamano: tamano, peso: 'semibold' });
+                });
+                y += 126;
+
+                // Detalle del grupo | Sanidad y alimentación
+                var anchoColumna = (CONTENT_W - 24) / 2;
+                var xDerecha = MARGIN + anchoColumna + 24;
+                [[MARGIN, 'Detalle del grupo'], [xDerecha, 'Sanidad y alimentación']].forEach(function (columna) {
+                    lienzo.texto(columna[1], columna[0], y + 9, { tamano: 15, peso: 'semibold', color: C.brand });
+                    lienzo.linea(columna[0], y + 26, columna[0] + anchoColumna, y + 26, C.border);
+                });
+
+                var detalle = [
+                    ['Código', ficha.c], ['Especie', texto(ficha.e)], ['Año clase', anioClase(ficha.y)],
+                    ['Centro origen', texto(ficha.ce)], ['Empresa', texto(ficha.em)]
+                ];
+                detalle.forEach(function (fila, index) {
+                    var yFila = y + 46 + index * 25;
+                    lienzo.texto(fila[0], MARGIN, yFila, { tamano: 13, color: C.muted });
+                    var valor = lienzo.cortar(fila[1], 13, 'semibold', anchoColumna - 168)[0];
+                    lienzo.texto(valor, MARGIN + 168, yFila, { tamano: 13, peso: 'semibold' });
+                });
+
+                var tieneMedicada = alimentacion && alimentacion.m > 0;
+                var finColumna = xDerecha + anchoColumna;
+                var sanidad = [
+                    ['Alimento medicado', tieneMedicada
+                        ? ['Sí · ' + porcentaje(alimentacion.m, alimentacion.t) + ' %', C.warnBg, C.warnText]
+                        : ['No', C.okBg, C.okText]],
+                    ['Antiparasitarios', tratamientos && tratamientos.ap
+                        ? ['Registrados', C.brand200, C.brand]
+                        : ['Sin registro', C.row, C.text2]],
+                    ['Antibióticos', tratamientos && tratamientos.ab
+                        ? ['Registrados', C.warnBg, C.warnText]
+                        : ['Sin registro', C.okBg, C.okText]]
+                ];
+                sanidad.forEach(function (fila, index) {
+                    var yFila = y + 48 + index * 28;
+                    lienzo.texto(fila[0], xDerecha, yFila, { tamano: 13, color: C.muted });
+                    lienzo.pastilla(fila[1][0], finColumna, yFila, fila[1][1], fila[1][2]);
+                });
+                var yPlanta = y + 48 + 3 * 28;
+                lienzo.texto('Planta de proceso', xDerecha, yPlanta, { tamano: 13, color: C.muted });
+                lienzo.texto(texto(pasos[4] && pasos[4][2]), finColumna, yPlanta, { tamano: 13, peso: 'semibold', alinear: 'right' });
+                y += 46 + 5 * 25 + 26;
+
+                // Cadena de trazabilidad
+                var anchoPaso = (CONTENT_W - 40) / 6;
+                var detallesPasos = pasos.map(function (paso) {
+                    var detallePaso = paso[2] || (paso[1] === 'p' ? 'Pendiente' : '');
+                    return detallePaso ? lienzo.cortar(detallePaso, 11, 'normal', anchoPaso - 8).slice(0, 2) : [];
+                });
+                var maxLineas = Math.max.apply(null, detallesPasos.map(function (lineas) { return lineas.length; }).concat([1]));
+                var altoCadena = 58 + 48 + 10 + 18 + maxLineas * 14 + 22;
+                lienzo.borde(MARGIN, y, CONTENT_W, altoCadena, C.border, 14);
+                lienzo.texto('Cadena de trazabilidad', MARGIN + 20, y + 31, { tamano: 15, peso: 'semibold', color: C.brand });
+
+                var yCirculo = y + 58 + 24;
+                pasos.slice(0, 6).forEach(function (paso, index) {
+                    var inicioColumna = MARGIN + 20 + index * anchoPaso;
+                    var cx = inicioColumna + anchoPaso / 2;
+                    var activo = paso[1] !== 'p';
+                    var siguienteActivo = pasos[index + 1] && pasos[index + 1][1] !== 'p';
+                    if (index > 0) lienzo.rect(inicioColumna, yCirculo - 1.5, anchoPaso / 2 - 24, 3, activo ? C.brand : C.borderStrong);
+                    if (index < pasos.length - 1) lienzo.rect(cx + 24, yCirculo - 1.5, anchoPaso / 2 - 24, 3, siguienteActivo ? C.brand : C.borderStrong);
+
+                    var icono = ICONO_POR_PASO[index];
+                    if (paso[1] === 'c') {
+                        lienzo.circulo(cx, yCirculo, 24, C.brand);
+                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
+                    } else if (paso[1] === 'e') {
+                        lienzo.circulo(cx, yCirculo, 24, C.accent);
+                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
+                    } else {
+                        lienzo.circulo(cx, yCirculo, 24, C.row, C.dashed);
+                        lienzo.imagen(icono + '-brand', cx - 11, yCirculo - 11, 22, 22);
+                    }
+
+                    var etiqueta = paso[0] === 'Alimentación y Tratamientos' ? 'Alimentación'
+                        : paso[0] === 'Producto Final' ? 'Producto final' : paso[0];
+                    lienzo.texto(etiqueta, cx, yCirculo + 24 + 19, { tamano: 13, peso: 'semibold', color: activo ? C.text : C.text2, alinear: 'center' });
+                    detallesPasos[index].forEach(function (linea, numeroLinea) {
+                        lienzo.texto(linea, cx, yCirculo + 24 + 38 + numeroLinea * 14, { tamano: 11, color: C.muted, alinear: 'center' });
+                    });
+                });
+                y += altoCadena + 26;
+
+                // Certificaciones
+                var certificaciones = ficha.ct || [];
+                if (certificaciones.length > 0) {
+                    lienzo.borde(MARGIN, y, CONTENT_W, 54, C.border, 10);
+                    lienzo.imagen('calidad-brand', MARGIN + 18, y + 16, 22, 22);
+                    lienzo.texto('Certificaciones', MARGIN + 50, y + 27, { tamano: 14, peso: 'semibold', color: C.brand });
+                    var xInsignia = PAGE_W - MARGIN - 18;
+                    certificaciones.slice().reverse().forEach(function (certificacion) {
+                        var ancho = lienzo.ancho(certificacion, 13, 'bold') + 24;
+                        xInsignia -= ancho;
+                        lienzo.rect(xInsignia, y + 14, ancho, 26, C.brand200, 6);
+                        lienzo.texto(certificacion, xInsignia + ancho / 2, y + 27, { tamano: 13, peso: 'bold', color: C.brand, alinear: 'center' });
+                        xInsignia -= 8;
+                    });
+                }
+            }
+
+            // ── Página 2: alimentación y tratamientos ──
+
+            function paginaAlimentacion(lienzo, ficha, nuevaPagina) {
+                var y = nuevaPagina();
+                var alimentacion = ficha.a;
+                var tratamientos = ficha.tr;
+
+                y = tituloSeccion(lienzo, y, 'feed', 'Detalle de alimentación');
+                if (!alimentacion) {
+                    y = mensajeVacio(lienzo, y, 'Sin registros de alimentación para este grupo');
+                } else {
+                    var tieneMedicada = alimentacion.m > 0;
+                    y = tarjetasResumen(lienzo, y, [
+                        { etiqueta: 'Alimento total', valor: kg(alimentacion.t) },
+                        { etiqueta: 'Alimento medicado', valor: tieneMedicada ? kg(alimentacion.m) + ' · ' + porcentaje(alimentacion.m, alimentacion.t) + ' %' : 'No', alerta: tieneMedicada },
+                        { etiqueta: 'Dietas utilizadas', valor: numero(alimentacion.n != null ? alimentacion.n : (alimentacion.d || []).length) }
+                    ]) + 16;
+
+                    var dietas = alimentacion.d || [];
+                    if (dietas.length > 0 || alimentacion.o) {
+                        var filasDietas = dietas.map(function (dieta) {
+                            var medicamento = dieta[2];
+                            return {
+                                estilo: medicamento ? 'alerta' : null,
+                                celdas: [texto(dieta[0]), texto(dieta[1]),
+                                    medicamento ? { pastilla: medicamento, fondo: C.warnPill, color: C.warnText } : '—',
+                                    numero(dieta[3]), porcentaje(dieta[3], alimentacion.t)]
+                            };
+                        });
+                        if (alimentacion.o) {
+                            filasDietas.push({ estilo: 'suave', celdas: ['Otras dietas (' + alimentacion.o[0] + ')', 'Varias', '—', numero(alimentacion.o[1]), porcentaje(alimentacion.o[1], alimentacion.t)] });
+                        }
+                        filasDietas.push({ estilo: 'total', celdas: ['Total', '', '', numero(alimentacion.t), '100'] });
+                        y = tabla(lienzo, y, [
+                            { titulo: 'Dieta', peso: 3, negrita: false },
+                            { titulo: 'Tipo', peso: 1.3, color: C.text2 },
+                            { titulo: 'Medicamento', peso: 1.4, color: C.muted },
+                            { titulo: 'Kg', peso: 1.1, alinear: 'right', negrita: true },
+                            { titulo: '%', peso: 0.7, alinear: 'right' }
+                        ], filasDietas, { nuevaPagina: nuevaPagina });
+                    }
+                }
+
+                y += 30;
+                if (y + 200 > CONTENT_BOTTOM) y = nuevaPagina();
+                y = tituloSeccion(lienzo, y, 'calidad', 'Tratamientos recibidos');
+                var items = (tratamientos && tratamientos.i) || [];
+                var contarTipo = function (fragmento) {
+                    return items.filter(function (item) { return (item[1] || '').toLowerCase().indexOf(fragmento) >= 0; }).length;
+                };
+                var antibioticos = contarTipo('antibi');
+                y = tarjetasResumen(lienzo, y, [
+                    { etiqueta: 'Aplicaciones totales', valor: numero(tratamientos ? tratamientos.n : 0) },
+                    { etiqueta: 'Antiparasitarios', valor: numero(contarTipo('parasit')) },
+                    { etiqueta: 'Antibióticos', valor: numero(antibioticos), alerta: antibioticos > 0 }
+                ]) + 16;
+
+                var filasTratamientos = items.map(function (item) {
+                    var tipo = (item[1] || '').toLowerCase();
+                    var esAntibiotico = tipo.indexOf('antibi') >= 0;
+                    var pastillaTipo = item[1]
+                        ? { pastilla: item[1], fondo: esAntibiotico ? C.warnPill : C.brand200, color: esAntibiotico ? C.warnText : C.brand }
+                        : '—';
+                    var inicio = fecha(item[3]);
+                    var fin = fecha(item[4]);
+                    var periodo = inicio ? inicio + (fin && fin !== inicio ? ' – ' + fin : '') : '—';
+                    return {
+                        estilo: esAntibiotico ? 'alerta' : null,
+                        celdas: [texto(item[0]), pastillaTipo, texto(item[2]), periodo, item[5] != null ? numero(item[5], 1) : '—']
+                    };
+                });
+                if (filasTratamientos.length === 0) {
+                    filasTratamientos.push({ estilo: 'nota', celdas: [tratamientos && tratamientos.n > 0 ? 'Detalle no incluido en el código QR' : 'Sin tratamientos registrados'] });
+                }
+                tabla(lienzo, y, [
+                    { titulo: 'Medicamento', peso: 1.6, negrita: true },
+                    { titulo: 'Tipo', peso: 1.3 },
+                    { titulo: 'Método', peso: 1, color: C.text2 },
+                    { titulo: 'Periodo', peso: 2, color: C.text2 },
+                    { titulo: 'Kg', peso: 0.9, alinear: 'right', negrita: true }
+                ], filasTratamientos, { nuevaPagina: nuevaPagina });
+            }
+
+            // ── Página 3: cosecha y despacho ──
+
+            function paginaCosecha(lienzo, ficha, nuevaPagina) {
+                var y = nuevaPagina();
+                var cosecha = ficha.h;
+                if (!cosecha) {
+                    y = tituloSeccion(lienzo, y, 'cosecha', 'Detalle de cosecha');
+                    mensajeVacio(lienzo, y, 'Sin cosecha registrada para este grupo');
+                    return;
+                }
+
+                var rango = cosecha.f && cosecha.f[0]
+                    ? cosecha.f[0] + (cosecha.f[1] && cosecha.f[1] !== cosecha.f[0] ? ' – ' + cosecha.f[1] : '') + ' · ' + numero(cosecha.n) + ' despachos'
+                    : numero(cosecha.n) + ' despachos';
+                y = tituloSeccion(lienzo, y, 'cosecha', 'Detalle de cosecha', rango);
+                y = tarjetasResumen(lienzo, y, [
+                    { etiqueta: 'Peces cosechados', valor: numero(cosecha.p) },
+                    { etiqueta: 'Biomasa bruta', valor: kg(cosecha.b) },
+                    { etiqueta: 'Biomasa neta', valor: kg(cosecha.nt) },
+                    { etiqueta: 'Peso promedio', valor: cosecha.p ? numero(cosecha.b / cosecha.p, 2) + ' kg' : '—' }
+                ]) + 30;
+
+                y = subtituloSeccion(lienzo, y, 'planta', 'Resumen por planta de proceso');
+                var filasPlantas = (cosecha.pl || []).map(function (planta) {
+                    return { celdas: [texto(planta[0]), numero(planta[1]), numero(planta[2]), numero(planta[3]), numero(planta[4]), porcentaje(planta[3], cosecha.b)] };
+                });
+                filasPlantas.push({ estilo: 'total', celdas: ['Total', numero(cosecha.n), numero(cosecha.p), numero(cosecha.b), numero(cosecha.nt), '100'] });
+                y = tabla(lienzo, y, [
+                    { titulo: 'Planta', peso: 1.6, negrita: true },
+                    { titulo: 'Despachos', peso: 1, alinear: 'right' },
+                    { titulo: 'Peces', peso: 1.1, alinear: 'right' },
+                    { titulo: 'Bruto kg', peso: 1.3, alinear: 'right', negrita: true },
+                    { titulo: 'Neto kg', peso: 1.3, alinear: 'right', negrita: true },
+                    { titulo: '%', peso: 0.8, alinear: 'right' }
+                ], filasPlantas, { nuevaPagina: nuevaPagina }) + 30;
+
+                if (y + 120 > CONTENT_BOTTOM) y = nuevaPagina();
+                y = subtituloSeccion(lienzo, y, 'ship', 'Despachos');
+                var despachos = cosecha.d || [];
+                var filasDespachos = despachos.map(function (despacho) {
+                    return { celdas: [texto(despacho[0]), texto(despacho[1]), texto(despacho[2]), texto(despacho[3]), texto(despacho[4]),
+                        numero(despacho[5]), numero(despacho[6]), numero(despacho[7])] };
+                });
+                var restantes = (cosecha.n || 0) - despachos.length;
+                if (restantes > 0) {
+                    filasDespachos.push({ estilo: 'nota', celdas: ['+ ' + numero(restantes) + ' despachos anteriores' + (cosecha.f && cosecha.f[0] ? ' (desde ' + cosecha.f[0] + ')' : '')] });
+                }
+                tabla(lienzo, y, [
+                    { titulo: 'Fecha', peso: 0.95 },
+                    { titulo: 'Centro', peso: 1.15 },
+                    { titulo: 'Planta', peso: 1 },
+                    { titulo: 'Guía', peso: 0.95, color: C.text2 },
+                    { titulo: 'Transportista', peso: 1.2, color: C.text2 },
+                    { titulo: 'Peces', peso: 0.8, alinear: 'right' },
+                    { titulo: 'Bruto kg', peso: 0.9, alinear: 'right', negrita: true },
+                    { titulo: 'Neto kg', peso: 0.9, alinear: 'right', negrita: true }
+                ], filasDespachos, { nuevaPagina: nuevaPagina, tamano: 11.5, tamanoCabecera: 10.5, espacio: 10 });
+            }
+
+            function generarPdf(ficha, recursos) {
+                var lienzo = crearLienzo(recursos);
+                var doc = lienzo.doc;
+
+                paginaResumen(lienzo, ficha);
+
+                // Páginas de detalle: encabezado compacto; devuelve el y donde empieza el contenido.
+                var nuevaPagina = function () {
+                    doc.addPage();
+                    return encabezadoCompacto(lienzo, ficha) + 28;
+                };
+                paginaAlimentacion(lienzo, ficha, nuevaPagina);
+                paginaCosecha(lienzo, ficha, nuevaPagina);
+
+                var totalPaginas = doc.getNumberOfPages();
+                for (var pagina = 1; pagina <= totalPaginas; pagina++) {
+                    doc.setPage(pagina);
+                    pie(lienzo, ficha, pagina, totalPaginas);
+                }
                 return doc;
             }
 
@@ -336,7 +846,7 @@
                     mostrarError();
                     return;
                 }
-                if (!ficha || ficha.v !== 1 || !ficha.c) {
+                if (!ficha || (ficha.v !== 1 && ficha.v !== 2) || !ficha.c) {
                     mostrarError();
                     return;
                 }
@@ -344,36 +854,38 @@
                 var nombreArchivo = 'Trazabilidad_' + String(ficha.c).replace(/[^\w-]+/g, '_') + '.pdf';
                 document.title = 'Ficha ' + ficha.c;
 
-                var doc;
-                try {
-                    doc = generarPdf(ficha);
-                } catch (error) {
-                    mostrarError('Ocurrió un error al generar el PDF.');
-                    return;
-                }
+                cargarRecursos().then(function (recursos) {
+                    var doc;
+                    try {
+                        doc = generarPdf(ficha, recursos);
+                    } catch (error) {
+                        mostrarError('Ocurrió un error al generar el PDF.');
+                        return;
+                    }
 
-                var pdfBytes = doc.output('arraybuffer');
-                var pdfFile = new File([pdfBytes], nombreArchivo, { type: 'application/pdf' });
-                var pdfUrl = URL.createObjectURL(pdfFile);
+                    var pdfBytes = doc.output('arraybuffer');
+                    var pdfFile = new File([pdfBytes], nombreArchivo, { type: 'application/pdf' });
+                    var pdfUrl = URL.createObjectURL(pdfFile);
 
-                ['btn-abrir', 'toolbar-abrir'].forEach(function (id) {
-                    document.getElementById(id).href = pdfUrl;
-                });
-                ['btn-descargar', 'toolbar-descargar'].forEach(function (id) {
-                    var enlace = document.getElementById(id);
-                    enlace.href = pdfUrl;
-                    enlace.download = nombreArchivo;
-                });
-                document.getElementById('titulo-listo').textContent = 'Ficha ' + ficha.c;
-                document.getElementById('toolbar-titulo').textContent = 'Ficha ' + ficha.c;
+                    ['btn-abrir', 'toolbar-abrir'].forEach(function (id) {
+                        document.getElementById(id).href = pdfUrl;
+                    });
+                    ['btn-descargar', 'toolbar-descargar'].forEach(function (id) {
+                        var enlace = document.getElementById(id);
+                        enlace.href = pdfUrl;
+                        enlace.download = nombreArchivo;
+                    });
+                    document.getElementById('titulo-listo').textContent = 'Ficha ' + ficha.c;
+                    document.getElementById('toolbar-titulo').textContent = 'Ficha ' + ficha.c;
 
-                // El PDF se muestra dentro de la página (pdf.js) en vez de navegar al blob:
-                // Safari de iOS deja colgada la navegación de nivel superior a un blob, porque
-                // libera la URL al descargar la página que la creó. "Abrir" lo lleva al visor
-                // nativo en otra pestaña, donde la página original sigue viva.
-                renderizarPdf(pdfBytes).catch(function () {
-                    // Sin pdf.js (CDN bloqueado, navegador antiguo) queda la tarjeta con botones.
-                    mostrar('estado-listo');
+                    // El PDF se muestra dentro de la página (pdf.js) en vez de navegar al blob:
+                    // Safari de iOS deja colgada la navegación de nivel superior a un blob, porque
+                    // libera la URL al descargar la página que la creó. "Abrir" lo lleva al visor
+                    // nativo en otra pestaña, donde la página original sigue viva.
+                    renderizarPdf(pdfBytes).catch(function () {
+                        // Sin pdf.js (CDN bloqueado, navegador antiguo) queda la tarjeta con botones.
+                        mostrar('estado-listo');
+                    });
                 });
             }
 
