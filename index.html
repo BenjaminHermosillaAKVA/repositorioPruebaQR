@@ -483,19 +483,32 @@
                     inicioTramo = y;
                 }
                 cabecera();
-                filas.forEach(function (fila) {
-                    var estilo = fila.estilo;
-                    var peso = estilo === 'total' ? 'bold' : null;
+
+                function medirFila(fila) {
+                    var peso = fila.estilo === 'total' ? 'bold' : null;
                     var lineasPorCelda = fila.celdas.map(function (celda, index) {
                         if (celda && typeof celda === 'object') return [celda.pastilla];
                         if (celda === '') return [''];
                         var pesoCelda = peso || (columnas[index].negrita ? 'semibold' : 'normal');
-                        return estilo === 'nota' ? [texto(celda)] : lienzo.cortar(texto(celda), tamano, pesoCelda, anchos[index]);
+                        return fila.estilo === 'nota' ? [texto(celda)] : lienzo.cortar(texto(celda), tamano, pesoCelda, anchos[index]);
                     });
                     var maxLineas = Math.max.apply(null, lineasPorCelda.map(function (lineas) { return lineas.length; }));
-                    var alto = maxLineas * interlineado + 18;
+                    return { lineasPorCelda: lineasPorCelda, alto: maxLineas * interlineado + 18 };
+                }
 
-                    if (y + alto > CONTENT_BOTTOM) {
+                filas.forEach(function (fila, indiceFila) {
+                    var estilo = fila.estilo;
+                    var peso = estilo === 'total' ? 'bold' : null;
+                    var medida = medirFila(fila);
+                    var lineasPorCelda = medida.lineasPorCelda;
+                    var alto = medida.alto;
+                    // La fila de total no se separa de la anterior: si no caben juntas, saltan las dos.
+                    var siguiente = filas[indiceFila + 1];
+                    var altoReservado = siguiente && siguiente.estilo === 'total' && indiceFila + 2 === filas.length
+                        ? alto + medirFila(siguiente).alto
+                        : alto;
+
+                    if (y + altoReservado > CONTENT_BOTTOM) {
                         cerrarTramo();
                         y = opciones.nuevaPagina();
                         inicioTramo = y;
@@ -787,7 +800,8 @@
                     var tieneMedicada = alimentacion.m > 0;
                     y = tarjetasResumen(lienzo, y, [
                         { etiqueta: 'Alimento', valor: kg(alimentacion.t) },
-                        { etiqueta: 'Alimento medicado', valor: tieneMedicada ? kg(alimentacion.m) + ' · ' + porcentaje(alimentacion.m, alimentacion.t) + ' %' : 'No', alerta: tieneMedicada },
+                        { etiqueta: 'Alimento medicado', valor: tieneMedicada ? kg(alimentacion.m) : 'No', alerta: tieneMedicada },
+                        { etiqueta: '% medicado', valor: porcentaje(alimentacion.m || 0, alimentacion.t) + ' %', alerta: tieneMedicada },
                         { etiqueta: 'Dietas utilizadas', valor: numero(alimentacion.n != null ? alimentacion.n : (alimentacion.d || []).length) }
                     ]) + 16;
 
