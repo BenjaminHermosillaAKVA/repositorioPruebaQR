@@ -138,7 +138,6 @@
             var LOGO_RATIO = 187 / 32;
 
             var ICONOS = ['cage', 'feed', 'cosecha', 'ship', 'planta', 'empaque', 'fishes', 'calidad'];
-            var ICONO_POR_PASO = ['cage', 'feed', 'cosecha', 'ship', 'planta', 'empaque'];
 
             function mostrar(idEstado) {
                 ['estado-cargando', 'estado-listo', 'estado-error'].forEach(function (id) {
@@ -378,8 +377,6 @@
                 var subtitulo = [ficha.e, ficha.ce, ficha.em].filter(Boolean).join(' · ');
                 if (subtitulo) lienzo.texto(subtitulo, MARGIN, 130, { tamano: 15, color: C.brand200 });
 
-                lienzo.texto('CÓDIGO DE GRUPO', PAGE_W - MARGIN, 80,
-                    { tamano: 11, color: C.brand300, alinear: 'right', espaciado: 0.9 });
                 var anchoCodigo = lienzo.ancho(ficha.c, 20, 'bold') + 32;
                 lienzo.rect(PAGE_W - MARGIN - anchoCodigo, 91, anchoCodigo, 44, C.white, 8);
                 lienzo.texto(ficha.c, PAGE_W - MARGIN - anchoCodigo / 2, 113,
@@ -404,7 +401,7 @@
             function pie(lienzo, ficha, pagina, totalPaginas) {
                 lienzo.linea(MARGIN, FOOTER_LINE_Y, PAGE_W - MARGIN, FOOTER_LINE_Y, C.border);
                 lienzo.texto('Emitido el ' + texto(ficha.g), MARGIN, FOOTER_LINE_Y + 26, { tamano: 11, peso: 'semibold', color: C.text2 });
-                lienzo.texto('Generado desde el código QR del grupo · DigitalEcosystem', MARGIN, FOOTER_LINE_Y + 42, { tamano: 11, color: C.muted });
+                lienzo.texto('Digital Business Analytics', MARGIN, FOOTER_LINE_Y + 42, { tamano: 11, color: C.muted });
                 var anchoLogo = 14 * LOGO_RATIO;
                 lienzo.imagen('logo-brand', PAGE_W - MARGIN - anchoLogo, FOOTER_LINE_Y + 35, anchoLogo, 14);
                 lienzo.texto('Página ' + pagina + ' de ' + totalPaginas, PAGE_W - MARGIN - anchoLogo - 12, FOOTER_LINE_Y + 42,
@@ -480,6 +477,11 @@
                     lienzo.borde(MARGIN, inicioTramo, CONTENT_W, y - inicioTramo, C.border, 8);
                 }
 
+                // Si no caben la cabecera y un par de filas, la tabla empieza en la página siguiente.
+                if (y + 34 + Math.min(filas.length, 3) * 36 > CONTENT_BOTTOM) {
+                    y = opciones.nuevaPagina();
+                    inicioTramo = y;
+                }
                 cabecera();
                 filas.forEach(function (fila) {
                     var estilo = fila.estilo;
@@ -536,17 +538,101 @@
                 return y;
             }
 
+            // ── Normalización del payload ──
+
+            var NOMBRE_ETAPA = { ad: 'Agua dulce', mr: 'Mar' };
+            var ICONOS_CADENA = {
+                ad: ['fishes', 'feed', 'ship'],
+                mr: ['cage', 'feed', 'cosecha', 'ship', 'planta', 'empaque']
+            };
+
+            // v1/v2 traían una sola cadena (tl) y la alimentación total con dietas (a):
+            // se leen como una única etapa de mar para que los QR antiguos sigan abriendo.
+            function normalizarFicha(ficha) {
+                if (ficha.v >= 3) return ficha;
+                ficha.et = [{ k: 'mr', cs: ficha.ce ? [ficha.ce] : [], a: ficha.a, tr: ficha.tr, tl: ficha.tl || [] }];
+                ficha.mv = [];
+                ficha.mvn = 0;
+                return ficha;
+            }
+
+            function etapaMar(ficha) {
+                return (ficha.et || []).filter(function (etapa) { return etapa.k === 'mr'; })[0] || null;
+            }
+
+            // Con muchos centros la columna del paso no alcanza: se muestran dos y el resto se cuenta.
+            function detallePaso(etapa, paso, index) {
+                if (index === 0 && etapa.cs && etapa.cs.length > 2) {
+                    return etapa.cs[0] + ' y ' + (etapa.cs.length - 1) + ' centros más';
+                }
+                return paso[2] || (paso[1] === 'p' ? 'Pendiente' : '');
+            }
+
+            function etiquetaPaso(etiqueta) {
+                if (etiqueta === 'Alimentación y Tratamientos') return 'Alimentación';
+                if (etiqueta === 'Producto Final') return 'Producto final';
+                return etiqueta;
+            }
+
+            // Cadena horizontal de una etapa. Devuelve el alto dibujado.
+            function cadenaEtapa(lienzo, y, etapa) {
+                var pasos = etapa.tl || [];
+                var iconos = ICONOS_CADENA[etapa.k] || ICONOS_CADENA.mr;
+                var cantidad = Math.max(pasos.length, 1);
+                var anchoPaso = (CONTENT_W - 40) / cantidad;
+                var detalles = pasos.map(function (paso, index) {
+                    var detalle = detallePaso(etapa, paso, index);
+                    return detalle ? lienzo.cortar(detalle, 11, 'normal', Math.min(anchoPaso - 8, 200)).slice(0, 2) : [];
+                });
+                var maxLineas = Math.max.apply(null, detalles.map(function (lineas) { return lineas.length; }).concat([1]));
+                var alto = 58 + 48 + 10 + 18 + maxLineas * 14 + 20;
+
+                lienzo.borde(MARGIN, y, CONTENT_W, alto, C.border, 14);
+                lienzo.texto('Cadena de trazabilidad · ' + (NOMBRE_ETAPA[etapa.k] || 'Mar'), MARGIN + 20, y + 31,
+                    { tamano: 15, peso: 'semibold', color: C.brand });
+
+                var yCirculo = y + 58 + 24;
+                pasos.forEach(function (paso, index) {
+                    var inicioColumna = MARGIN + 20 + index * anchoPaso;
+                    var cx = inicioColumna + anchoPaso / 2;
+                    var activo = paso[1] !== 'p';
+                    var siguienteActivo = pasos[index + 1] && pasos[index + 1][1] !== 'p';
+                    if (index > 0) lienzo.rect(inicioColumna, yCirculo - 1.5, anchoPaso / 2 - 24, 3, activo ? C.brand : C.borderStrong);
+                    if (index < pasos.length - 1) lienzo.rect(cx + 24, yCirculo - 1.5, anchoPaso / 2 - 24, 3, siguienteActivo ? C.brand : C.borderStrong);
+
+                    var icono = iconos[index] || 'cage';
+                    if (paso[1] === 'c') {
+                        lienzo.circulo(cx, yCirculo, 24, C.brand);
+                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
+                    } else if (paso[1] === 'e') {
+                        lienzo.circulo(cx, yCirculo, 24, C.accent);
+                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
+                    } else {
+                        lienzo.circulo(cx, yCirculo, 24, C.row, C.dashed);
+                        lienzo.imagen(icono + '-brand', cx - 11, yCirculo - 11, 22, 22);
+                    }
+
+                    lienzo.texto(etiquetaPaso(paso[0]), cx, yCirculo + 24 + 19,
+                        { tamano: 13, peso: 'semibold', color: activo ? C.text : C.text2, alinear: 'center' });
+                    detalles[index].forEach(function (linea, numeroLinea) {
+                        lienzo.texto(linea, cx, yCirculo + 24 + 38 + numeroLinea * 14, { tamano: 11, color: C.muted, alinear: 'center' });
+                    });
+                });
+                return alto;
+            }
+
             // ── Página 1: resumen ──
 
             function paginaResumen(lienzo, ficha) {
                 var y = encabezadoCompleto(lienzo, ficha) + 28;
-                var pasos = ficha.tl || [];
                 var alimentacion = ficha.a;
                 var tratamientos = ficha.tr;
                 var cosecha = ficha.h;
+                var mar = etapaMar(ficha);
+                var pasosMar = (mar && mar.tl) || [];
 
                 // Tarjetas superiores
-                var biomasa = cosecha ? kg(cosecha.b) : (pasos[2] && pasos[2][2]) || '—';
+                var biomasa = cosecha ? kg(cosecha.b) : (pasosMar[2] && pasosMar[2][2]) || '—';
                 var tarjetas = [
                     { icono: 'fishes', etiqueta: 'Especie', valor: texto(ficha.e) },
                     { icono: 'cage', etiqueta: 'Año clase', valor: anioClase(ficha.y) },
@@ -601,55 +687,28 @@
                     lienzo.texto(fila[0], xDerecha, yFila, { tamano: 13, color: C.muted });
                     lienzo.pastilla(fila[1][0], finColumna, yFila, fila[1][1], fila[1][2]);
                 });
+                // Puede haber varias plantas destino ("Rio Dulce, Surproceso"): se reparten en
+                // hasta dos líneas alineadas a la derecha.
                 var yPlanta = y + 48 + 3 * 28;
-                lienzo.texto('Planta de proceso', xDerecha, yPlanta, { tamano: 13, color: C.muted });
-                lienzo.texto(texto(pasos[4] && pasos[4][2]), finColumna, yPlanta, { tamano: 13, peso: 'semibold', alinear: 'right' });
+                var plantasTexto = texto(pasosMar[4] && pasosMar[4][2]);
+                var etiquetaPlanta = plantasTexto.indexOf(',') < 0 ? 'Planta de proceso' : 'Plantas de proceso';
+                lienzo.texto(etiquetaPlanta, xDerecha, yPlanta, { tamano: 13, color: C.muted });
+                var anchoEtiquetaPlanta = lienzo.ancho(etiquetaPlanta, 13, 'normal');
+                var lineasPlanta = lienzo.cortar(plantasTexto, 13, 'semibold', anchoColumna - anchoEtiquetaPlanta - 16).slice(0, 2);
+                lineasPlanta.forEach(function (linea, numeroLinea) {
+                    lienzo.texto(linea, finColumna, yPlanta + numeroLinea * 17, { tamano: 13, peso: 'semibold', alinear: 'right' });
+                });
                 y += 46 + 5 * 25 + 26;
 
-                // Cadena de trazabilidad
-                var anchoPaso = (CONTENT_W - 40) / 6;
-                var detallesPasos = pasos.map(function (paso) {
-                    var detallePaso = paso[2] || (paso[1] === 'p' ? 'Pendiente' : '');
-                    return detallePaso ? lienzo.cortar(detallePaso, 11, 'normal', anchoPaso - 8).slice(0, 2) : [];
+                // Una cadena por etapa: agua dulce y mar.
+                (ficha.et || []).forEach(function (etapa) {
+                    y += cadenaEtapa(lienzo, y, etapa) + 16;
                 });
-                var maxLineas = Math.max.apply(null, detallesPasos.map(function (lineas) { return lineas.length; }).concat([1]));
-                var altoCadena = 58 + 48 + 10 + 18 + maxLineas * 14 + 22;
-                lienzo.borde(MARGIN, y, CONTENT_W, altoCadena, C.border, 14);
-                lienzo.texto('Cadena de trazabilidad', MARGIN + 20, y + 31, { tamano: 15, peso: 'semibold', color: C.brand });
-
-                var yCirculo = y + 58 + 24;
-                pasos.slice(0, 6).forEach(function (paso, index) {
-                    var inicioColumna = MARGIN + 20 + index * anchoPaso;
-                    var cx = inicioColumna + anchoPaso / 2;
-                    var activo = paso[1] !== 'p';
-                    var siguienteActivo = pasos[index + 1] && pasos[index + 1][1] !== 'p';
-                    if (index > 0) lienzo.rect(inicioColumna, yCirculo - 1.5, anchoPaso / 2 - 24, 3, activo ? C.brand : C.borderStrong);
-                    if (index < pasos.length - 1) lienzo.rect(cx + 24, yCirculo - 1.5, anchoPaso / 2 - 24, 3, siguienteActivo ? C.brand : C.borderStrong);
-
-                    var icono = ICONO_POR_PASO[index];
-                    if (paso[1] === 'c') {
-                        lienzo.circulo(cx, yCirculo, 24, C.brand);
-                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
-                    } else if (paso[1] === 'e') {
-                        lienzo.circulo(cx, yCirculo, 24, C.accent);
-                        lienzo.imagen(icono + '-white', cx - 12, yCirculo - 12, 24, 24);
-                    } else {
-                        lienzo.circulo(cx, yCirculo, 24, C.row, C.dashed);
-                        lienzo.imagen(icono + '-brand', cx - 11, yCirculo - 11, 22, 22);
-                    }
-
-                    var etiqueta = paso[0] === 'Alimentación y Tratamientos' ? 'Alimentación'
-                        : paso[0] === 'Producto Final' ? 'Producto final' : paso[0];
-                    lienzo.texto(etiqueta, cx, yCirculo + 24 + 19, { tamano: 13, peso: 'semibold', color: activo ? C.text : C.text2, alinear: 'center' });
-                    detallesPasos[index].forEach(function (linea, numeroLinea) {
-                        lienzo.texto(linea, cx, yCirculo + 24 + 38 + numeroLinea * 14, { tamano: 11, color: C.muted, alinear: 'center' });
-                    });
-                });
-                y += altoCadena + 26;
+                y += 10;
 
                 // Certificaciones
                 var certificaciones = ficha.ct || [];
-                if (certificaciones.length > 0) {
+                if (certificaciones.length > 0 && y + 54 <= CONTENT_BOTTOM) {
                     lienzo.borde(MARGIN, y, CONTENT_W, 54, C.border, 10);
                     lienzo.imagen('calidad-brand', MARGIN + 18, y + 16, 22, 22);
                     lienzo.texto('Certificaciones', MARGIN + 50, y + 27, { tamano: 14, peso: 'semibold', color: C.brand });
@@ -664,66 +723,119 @@
                 }
             }
 
-            // ── Página 2: alimentación y tratamientos ──
+            // ── Página 2: movimientos, alimentación por etapa y tratamientos ──
 
-            function paginaAlimentacion(lienzo, ficha, nuevaPagina) {
+            function paginaDetalle(lienzo, ficha, nuevaPagina) {
                 var y = nuevaPagina();
-                var alimentacion = ficha.a;
-                var tratamientos = ficha.tr;
+                function asegurarEspacio(alto) {
+                    if (y + alto > CONTENT_BOTTOM) y = nuevaPagina();
+                }
 
-                y = tituloSeccion(lienzo, y, 'feed', 'Detalle de alimentación');
-                if (!alimentacion) {
-                    y = mensajeVacio(lienzo, y, 'Sin registros de alimentación para este grupo');
+                // Movimientos entre centros
+                var movimientos = ficha.mv || [];
+                var totalMovimientos = ficha.mvn || movimientos.length;
+                y = tituloSeccion(lienzo, y, 'ship', 'Movimientos entre centros',
+                    totalMovimientos ? numero(totalMovimientos) + (totalMovimientos === 1 ? ' movimiento' : ' movimientos') : null);
+                if (movimientos.length === 0) {
+                    y = mensajeVacio(lienzo, y, totalMovimientos > 0
+                        ? 'Detalle de movimientos no incluido en el código QR'
+                        : 'Sin movimientos registrados para este grupo');
                 } else {
+                    var filasMovimientos = movimientos.map(function (movimiento) {
+                        var tipo = movimiento[4];
+                        var pastillaTipo = tipo === 't'
+                            ? { pastilla: 'Traslado', fondo: C.brand200, color: C.brand }
+                            : tipo === 'x'
+                                ? { pastilla: 'Traspaso', fondo: C.row, color: C.text2 }
+                                : { pastilla: 'Venta', fondo: C.row, color: C.text2 };
+                        var destino = texto(movimiento[2]) + (movimiento[3] ? ' (' + movimiento[3] + ')' : '');
+                        return {
+                            estilo: tipo === 't' ? null : 'suave',
+                            celdas: [texto(movimiento[0]), texto(movimiento[1]), destino, pastillaTipo,
+                                numero(movimiento[5]), movimiento[7] != null ? numero(movimiento[7]) : '—', numero(movimiento[6])]
+                        };
+                    });
+                    if (totalMovimientos > movimientos.length) {
+                        filasMovimientos.push({ estilo: 'nota', celdas: ['+ ' + numero(totalMovimientos - movimientos.length) + ' movimientos posteriores'] });
+                    }
+                    y = tabla(lienzo, y, [
+                        { titulo: 'Fecha', peso: 0.95 },
+                        { titulo: 'Desde', peso: 1.3 },
+                        { titulo: 'Hacia', peso: 1.6 },
+                        { titulo: 'Tipo', peso: 0.95 },
+                        { titulo: 'Peces', peso: 0.9, alinear: 'right' },
+                        { titulo: 'Peso g', peso: 0.7, alinear: 'right' },
+                        { titulo: 'Biomasa kg', peso: 1, alinear: 'right', negrita: true }
+                    ], filasMovimientos, { nuevaPagina: nuevaPagina, tamano: 11.5, tamanoCabecera: 10.5, espacio: 10 });
+                    lienzo.texto('Traspaso: los peces pasan a una población de otro grupo; no se siguen ni se suman en esta ficha.',
+                        MARGIN, y + 14, { tamano: 10, color: C.muted });
+                    y += 24;
+                }
+
+                // Alimentación por etapa
+                (ficha.et || []).forEach(function (etapa) {
+                    var alimentacion = etapa.a;
+                    y += 30;
+                    // Título + tarjetas + cabecera y unas filas de la tabla, para no dejarla huérfana.
+                    asegurarEspacio(300);
+                    y = tituloSeccion(lienzo, y, 'feed', 'Detalle de alimentación · ' + (NOMBRE_ETAPA[etapa.k] || 'Mar'),
+                        etapa.cs && etapa.cs.length ? etapa.cs.length + (etapa.cs.length === 1 ? ' centro' : ' centros') : null);
+                    if (!alimentacion) {
+                        y = mensajeVacio(lienzo, y, 'Sin registros de alimentación en esta etapa');
+                        return;
+                    }
                     var tieneMedicada = alimentacion.m > 0;
                     y = tarjetasResumen(lienzo, y, [
-                        { etiqueta: 'Alimento total', valor: kg(alimentacion.t) },
+                        { etiqueta: 'Alimento', valor: kg(alimentacion.t) },
                         { etiqueta: 'Alimento medicado', valor: tieneMedicada ? kg(alimentacion.m) + ' · ' + porcentaje(alimentacion.m, alimentacion.t) + ' %' : 'No', alerta: tieneMedicada },
                         { etiqueta: 'Dietas utilizadas', valor: numero(alimentacion.n != null ? alimentacion.n : (alimentacion.d || []).length) }
                     ]) + 16;
 
                     var dietas = alimentacion.d || [];
-                    if (dietas.length > 0 || alimentacion.o) {
-                        var filasDietas = dietas.map(function (dieta) {
-                            var medicamento = dieta[2];
-                            return {
-                                estilo: medicamento ? 'alerta' : null,
-                                celdas: [texto(dieta[0]), texto(dieta[1]),
-                                    medicamento ? { pastilla: medicamento, fondo: C.warnPill, color: C.warnText } : '—',
-                                    numero(dieta[3]), porcentaje(dieta[3], alimentacion.t)]
-                            };
-                        });
-                        if (alimentacion.o) {
-                            filasDietas.push({ estilo: 'suave', celdas: ['Otras dietas (' + alimentacion.o[0] + ')', 'Varias', '—', numero(alimentacion.o[1]), porcentaje(alimentacion.o[1], alimentacion.t)] });
-                        }
-                        filasDietas.push({ estilo: 'total', celdas: ['Total', '', '', numero(alimentacion.t), '100'] });
-                        y = tabla(lienzo, y, [
-                            { titulo: 'Dieta', peso: 3, negrita: false },
-                            { titulo: 'Tipo', peso: 1.3, color: C.text2 },
-                            { titulo: 'Medicamento', peso: 1.4, color: C.muted },
-                            { titulo: 'Kg', peso: 1.1, alinear: 'right', negrita: true },
-                            { titulo: '%', peso: 0.7, alinear: 'right' }
-                        ], filasDietas, { nuevaPagina: nuevaPagina });
+                    if (dietas.length === 0 && !alimentacion.o) return;
+                    var filasDietas = dietas.map(function (dieta) {
+                        var medicamento = dieta[2];
+                        return {
+                            estilo: medicamento ? 'alerta' : null,
+                            celdas: [texto(dieta[0]), texto(dieta[1]),
+                                medicamento ? { pastilla: medicamento, fondo: C.warnPill, color: C.warnText } : '—',
+                                numero(dieta[3]), porcentaje(dieta[3], alimentacion.t)]
+                        };
+                    });
+                    if (alimentacion.o) {
+                        filasDietas.push({ estilo: 'suave', celdas: ['Otras dietas (' + alimentacion.o[0] + ')', 'Varias', '—', numero(alimentacion.o[1]), porcentaje(alimentacion.o[1], alimentacion.t)] });
                     }
-                }
+                    filasDietas.push({ estilo: 'total', celdas: ['Total', '', '', numero(alimentacion.t), '100'] });
+                    y = tabla(lienzo, y, [
+                        { titulo: 'Dieta', peso: 3 },
+                        { titulo: 'Tipo', peso: 1.3, color: C.text2 },
+                        { titulo: 'Medicamento', peso: 1.4, color: C.muted },
+                        { titulo: 'Kg', peso: 1.1, alinear: 'right', negrita: true },
+                        { titulo: '%', peso: 0.7, alinear: 'right' }
+                    ], filasDietas, { nuevaPagina: nuevaPagina });
+                });
 
+                // Tratamientos de ambas etapas en una tabla, con la etapa de cada uno.
                 y += 30;
-                if (y + 200 > CONTENT_BOTTOM) y = nuevaPagina();
+                asegurarEspacio(200);
                 y = tituloSeccion(lienzo, y, 'calidad', 'Tratamientos recibidos');
-                var items = (tratamientos && tratamientos.i) || [];
+                var items = [];
+                (ficha.et || []).forEach(function (etapa) {
+                    ((etapa.tr && etapa.tr.i) || []).forEach(function (item) { items.push({ etapa: etapa.k, item: item }); });
+                });
                 var contarTipo = function (fragmento) {
-                    return items.filter(function (item) { return (item[1] || '').toLowerCase().indexOf(fragmento) >= 0; }).length;
+                    return items.filter(function (registro) { return (registro.item[1] || '').toLowerCase().indexOf(fragmento) >= 0; }).length;
                 };
                 var antibioticos = contarTipo('antibi');
                 y = tarjetasResumen(lienzo, y, [
-                    { etiqueta: 'Aplicaciones totales', valor: numero(tratamientos ? tratamientos.n : 0) },
+                    { etiqueta: 'Aplicaciones totales', valor: numero(ficha.tr ? ficha.tr.n : 0) },
                     { etiqueta: 'Antiparasitarios', valor: numero(contarTipo('parasit')) },
                     { etiqueta: 'Antibióticos', valor: numero(antibioticos), alerta: antibioticos > 0 }
                 ]) + 16;
 
-                var filasTratamientos = items.map(function (item) {
-                    var tipo = (item[1] || '').toLowerCase();
-                    var esAntibiotico = tipo.indexOf('antibi') >= 0;
+                var filasTratamientos = items.map(function (registro) {
+                    var item = registro.item;
+                    var esAntibiotico = (item[1] || '').toLowerCase().indexOf('antibi') >= 0;
                     var pastillaTipo = item[1]
                         ? { pastilla: item[1], fondo: esAntibiotico ? C.warnPill : C.brand200, color: esAntibiotico ? C.warnText : C.brand }
                         : '—';
@@ -732,18 +844,20 @@
                     var periodo = inicio ? inicio + (fin && fin !== inicio ? ' – ' + fin : '') : '—';
                     return {
                         estilo: esAntibiotico ? 'alerta' : null,
-                        celdas: [texto(item[0]), pastillaTipo, texto(item[2]), periodo, item[5] != null ? numero(item[5], 1) : '—']
+                        celdas: [texto(item[0]), NOMBRE_ETAPA[registro.etapa] || '—', pastillaTipo, texto(item[2]), periodo,
+                            item[5] != null ? numero(item[5], 1) : '—']
                     };
                 });
                 if (filasTratamientos.length === 0) {
-                    filasTratamientos.push({ estilo: 'nota', celdas: [tratamientos && tratamientos.n > 0 ? 'Detalle no incluido en el código QR' : 'Sin tratamientos registrados'] });
+                    filasTratamientos.push({ estilo: 'nota', celdas: [ficha.tr && ficha.tr.n > 0 ? 'Detalle no incluido en el código QR' : 'Sin tratamientos registrados'] });
                 }
                 tabla(lienzo, y, [
-                    { titulo: 'Medicamento', peso: 1.6, negrita: true },
+                    { titulo: 'Medicamento', peso: 1.5, negrita: true },
+                    { titulo: 'Etapa', peso: 0.9, color: C.text2 },
                     { titulo: 'Tipo', peso: 1.3 },
-                    { titulo: 'Método', peso: 1, color: C.text2 },
-                    { titulo: 'Periodo', peso: 2, color: C.text2 },
-                    { titulo: 'Kg', peso: 0.9, alinear: 'right', negrita: true }
+                    { titulo: 'Método', peso: 0.9, color: C.text2 },
+                    { titulo: 'Periodo', peso: 1.9, color: C.text2 },
+                    { titulo: 'Kg', peso: 0.8, alinear: 'right', negrita: true }
                 ], filasTratamientos, { nuevaPagina: nuevaPagina });
             }
 
@@ -817,7 +931,7 @@
                     doc.addPage();
                     return encabezadoCompacto(lienzo, ficha) + 28;
                 };
-                paginaAlimentacion(lienzo, ficha, nuevaPagina);
+                paginaDetalle(lienzo, ficha, nuevaPagina);
                 paginaCosecha(lienzo, ficha, nuevaPagina);
 
                 var totalPaginas = doc.getNumberOfPages();
@@ -846,10 +960,11 @@
                     mostrarError();
                     return;
                 }
-                if (!ficha || (ficha.v !== 1 && ficha.v !== 2) || !ficha.c) {
+                if (!ficha || [1, 2, 3].indexOf(ficha.v) < 0 || !ficha.c) {
                     mostrarError();
                     return;
                 }
+                ficha = normalizarFicha(ficha);
 
                 var nombreArchivo = 'Trazabilidad_' + String(ficha.c).replace(/[^\w-]+/g, '_') + '.pdf';
                 document.title = 'Ficha ' + ficha.c;
